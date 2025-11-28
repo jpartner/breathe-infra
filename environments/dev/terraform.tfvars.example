@@ -1,0 +1,13 @@
+# Copy this file to terraform.tfvars and fill in the values
+
+billing_account = "XXXXXX-XXXXXX-XXXXXX"
+
+# Optional: set if you have an organisation
+# org_id = "123456789012"
+
+# These should match outputs from the shared environment
+# shared_project_id = "breathe-shared"
+# shared_feeds_bucket = "breathe-pf-feeds"
+# shared_generated_data_bucket = "breathe-generated-product-data"
+# shared_images_bucket = "breathe-product-images"
+# db_password_secret_id = "db-password"

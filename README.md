@@ -16,16 +16,18 @@ breathe-infra/
 │   ├── 03-migration-plan.md  # Staged migration approach
 │   └── 04-service-inventory.md    # Service requirements
 │
-├── modules/                   # Reusable Terraform modules (TODO)
-│   ├── shared/               # Shared project resources
-│   ├── environment/          # Per-environment resources
-│   └── networking/           # VPC and connectivity
+├── modules/                   # Reusable Terraform modules
+│   ├── project/              # GCP project creation
+│   ├── artifact-registry/    # Container image repositories
+│   ├── networking/           # VPC, subnets, connectors
+│   ├── cloud-sql/            # PostgreSQL instance
+│   └── environment/          # Per-environment resources
 │
-├── environments/             # Environment-specific configs (TODO)
-│   ├── shared/
-│   ├── dev/
-│   ├── staging/
-│   └── production/
+├── environments/             # Environment-specific configs
+│   ├── shared/               # Shared project (builds, DB, artifacts)
+│   ├── dev/                  # Development environment
+│   ├── staging/              # Staging environment
+│   └── production/           # Production environment
 │
 └── tools/                    # Operational tooling (TODO)
     └── promote/              # Image promotion tool
@@ -38,7 +40,8 @@ breathe-shared          breathe-dev-env    breathe-staging-env    breathe-produc
 ├── Artifact Registry   ├── Cloud Run      ├── Cloud Run          ├── Cloud Run
 ├── Cloud Build         ├── Cloud Jobs     ├── Cloud Jobs         ├── Cloud Jobs
 ├── Cloud SQL           ├── GCS (env)      ├── GCS (env)          ├── GCS (env)
-└── GCS (shared)        └── SAs            └── SAs                └── SAs
+├── VPC + Connector     ├── Secrets        ├── Secrets            ├── Secrets
+└── GCS (shared)        └── Service Accts  └── Service Accts      └── Service Accts
 ```
 
 ## Getting Started
@@ -46,24 +49,60 @@ breathe-shared          breathe-dev-env    breathe-staging-env    breathe-produc
 ### Prerequisites
 
 - Terraform >= 1.5
-- gcloud CLI authenticated
-- Appropriate GCP permissions
+- gcloud CLI authenticated with appropriate permissions
+- Billing account ID
 
-### Initial Setup
+### Deployment Order
+
+Infrastructure must be deployed in this order:
+
+1. **Shared project first** (contains Artifact Registry, Cloud SQL, VPC)
+2. **Environment projects** (can be deployed in parallel after shared)
+
+### Deploy Shared Project
 
 ```bash
-# Clone repository
-git clone git@github.com:jpartner/breathe-infra.git
-cd breathe-infra
-
-# Review requirements documentation
-ls requirements/
-
-# (Once Terraform is set up)
 cd environments/shared
+
+# Create terraform.tfvars from example
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your billing_account
+
 terraform init
 terraform plan
+terraform apply
 ```
+
+### Deploy Environment Project
+
+```bash
+cd environments/dev  # or staging, production
+
+# Create terraform.tfvars from example
+cp terraform.tfvars.example terraform.tfvars
+# Edit with your billing_account and shared project outputs
+
+terraform init
+terraform plan
+terraform apply
+```
+
+## Modules
+
+### project
+Creates a GCP project with required APIs enabled.
+
+### artifact-registry
+Creates Docker repositories with lifecycle policies for image cleanup.
+
+### networking
+Creates VPC, subnets, VPC connector for Cloud Run, and private service connection for Cloud SQL.
+
+### cloud-sql
+Creates PostgreSQL instance with private IP, multiple databases, and stores password in Secret Manager.
+
+### environment
+Creates per-environment resources: service accounts, GCS buckets, and IAM bindings.
 
 ## Documentation
 
@@ -77,25 +116,21 @@ terraform plan
 - [x] Phase 0.0: Create repository
 - [x] Phase 0.0: Document current state
 - [x] Phase 0.0: Document target architecture
-- [ ] Phase 0.1: Create GCP projects
-- [ ] Phase 0.2: Set up networking
-- [ ] Phase 0.3: Create Artifact Registry
-- [ ] Phase 1: Build pipeline migration
-- [ ] Phase 2: Dev environment
-- [ ] Phase 3: Staging environment
-- [ ] Phase 4: Production environment
-- [ ] Phase 5: Traffic migration
-- [ ] Phase 6: Cleanup
-
-## Contributing
-
-1. Create a feature branch
-2. Make changes
-3. Run `terraform fmt` and `terraform validate`
-4. Create PR for review
+- [x] Phase 0.0: Create Terraform modules
+- [ ] Phase 0.1: Deploy shared project
+- [ ] Phase 0.2: Deploy dev environment
+- [ ] Phase 0.3: Deploy staging environment
+- [ ] Phase 0.4: Deploy production environment
+- [ ] Phase 1: Create Cloud Build triggers
+- [ ] Phase 2: Deploy services to dev
+- [ ] Phase 3: Test and validate
+- [ ] Phase 4: Traffic migration
+- [ ] Phase 5: Cleanup old infrastructure
 
 ## Important Notes
 
-- **Do NOT modify existing `breathe-dev` infrastructure** until new environments are validated
+- **Do NOT modify existing `breathe-dev` project** until new environments are validated
+- Deploy shared project before any environment projects
 - All infrastructure changes must go through Terraform
 - Production changes require approval
+- Never commit `terraform.tfvars` files (they contain billing info)
