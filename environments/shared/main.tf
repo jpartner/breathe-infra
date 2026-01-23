@@ -350,29 +350,31 @@ resource "google_cloudbuild_trigger" "backend_dev" {
 }
 
 # =============================================================================
-# Database Schemas
-# Note: Requires Cloud SQL Proxy running locally:
+# Database Schemas (Optional - requires Cloud SQL Proxy)
+# To enable: terraform apply -var="manage_db_schemas=true" -var="db_admin_password=..."
+#
+# First start Cloud SQL Proxy:
 #   cloud-sql-proxy --port 5432 breathe-shared:europe-west2:breathe-db
-# Or use IAM auth:
-#   cloud-sql-proxy --auto-iam-authn breathe-shared:europe-west2:breathe-db
 # =============================================================================
 
-# PostgreSQL provider - connects via Cloud SQL Proxy on localhost
-# Run `terraform apply -target=module.database_schemas` after starting proxy
+# PostgreSQL provider - only configured when manage_db_schemas is true
+# When false, provider uses dummy config that won't attempt connection
 provider "postgresql" {
-  host     = var.db_host
-  port     = var.db_port
-  username = var.db_admin_user
-  password = var.db_admin_password
-  sslmode  = "disable"  # Proxy handles SSL
+  host     = var.manage_db_schemas ? var.db_host : "localhost"
+  port     = var.manage_db_schemas ? var.db_port : 5432
+  username = var.manage_db_schemas ? var.db_admin_user : "disabled"
+  password = var.manage_db_schemas ? var.db_admin_password : "disabled"
+  sslmode  = "disable"
 
-  # Connect to postgres database for admin operations
-  database = "postgres"
+  # Only connect when enabled
+  connect_timeout = var.manage_db_schemas ? 15 : 1
+  database        = "postgres"
 }
 
-# Create schemas in each environment database
+# Create schemas in each environment database (only when enabled)
 module "database_schemas" {
   source = "../../modules/database-schemas"
+  count  = var.manage_db_schemas ? 1 : 0
 
   databases    = module.cloud_sql.database_names
   schemas      = var.db_schemas

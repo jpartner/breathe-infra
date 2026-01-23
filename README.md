@@ -89,7 +89,7 @@ terraform apply
 
 ### Create Database Schemas
 
-Database schemas are managed in the shared project. To create schemas, you need Cloud SQL Proxy running locally:
+Database schemas are **opt-in** to avoid requiring Cloud SQL Proxy for normal Terraform operations.
 
 ```bash
 cd environments/shared
@@ -100,12 +100,15 @@ cloud-sql-proxy --port 5432 breathe-shared:europe-west2:breathe-db
 # 2. Get the database admin password from Secret Manager
 gcloud secrets versions access latest --secret=db-password --project=breathe-shared
 
-# 3. Apply schema changes
-terraform apply -target=module.database_schemas \
+# 3. Apply with schema management enabled
+terraform apply \
+  -var="manage_db_schemas=true" \
   -var="db_admin_password=<password_from_step_2>"
 ```
 
 This creates an `app` schema in each environment database (breathe_dev, breathe_staging, breathe_prod).
+
+**Note:** Normal `terraform plan/apply` commands work without the proxy - schema management is disabled by default.
 
 ## Modules
 

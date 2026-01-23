@@ -50,7 +50,7 @@ output "buckets" {
 
 output "database_schemas" {
   description = "Database schemas created in each environment database"
-  value       = module.database_schemas.schemas
+  value       = var.manage_db_schemas ? module.database_schemas[0].schemas : {}
 }
 
 output "database_names" {

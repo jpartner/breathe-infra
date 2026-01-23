@@ -55,6 +55,12 @@ variable "github_owner" {
 # Database Schema Variables
 # =============================================================================
 
+variable "manage_db_schemas" {
+  description = "Whether to manage database schemas (requires Cloud SQL Proxy running)"
+  type        = bool
+  default     = false
+}
+
 variable "db_host" {
   description = "Database host (localhost when using Cloud SQL Proxy)"
   type        = string
