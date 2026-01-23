@@ -12,6 +12,14 @@ SCHEMA="app"
 
 DATABASES=("breathe_dev" "breathe_staging" "breathe_prod")
 
+echo "Fetching database password from Secret Manager..."
+DB_PASSWORD=$(gcloud secrets versions access latest --secret=db-password --project=${PROJECT})
+
+if [ -z "$DB_PASSWORD" ]; then
+    echo "Error: Could not retrieve database password"
+    exit 1
+fi
+
 SQL=$(cat <<EOF
 CREATE SCHEMA IF NOT EXISTS ${SCHEMA};
 GRANT ALL ON SCHEMA ${SCHEMA} TO ${APP_USER};
@@ -27,7 +35,7 @@ echo ""
 
 for DB in "${DATABASES[@]}"; do
     echo "=== Creating schema in ${DB} ==="
-    gcloud sql connect ${INSTANCE} \
+    PGPASSWORD="${DB_PASSWORD}" gcloud sql connect ${INSTANCE} \
         --user=${USER} \
         --project=${PROJECT} \
         --database=${DB} \
