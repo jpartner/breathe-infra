@@ -21,6 +21,10 @@ terraform {
       source  = "hashicorp/time"
       version = "~> 0.9"
     }
+    postgresql = {
+      source  = "cyrilgdn/postgresql"
+      version = "~> 1.22"
+    }
   }
 
   # Uncomment and configure for remote state
@@ -206,4 +210,174 @@ resource "google_storage_bucket" "build_cache" {
   }
 
   depends_on = [module.project]
+}
+
+# =============================================================================
+# Cloud Build Triggers
+# Note: GitHub connections must be set up manually in the Cloud Console first:
+# https://console.cloud.google.com/cloud-build/repositories/2nd-gen
+# =============================================================================
+
+# Cloud Build trigger for breathe-pricing-rust -> dev
+resource "google_cloudbuild_trigger" "pricing_rust_dev" {
+  project     = module.project.project_id
+  name        = "breathe-pricing-rust-dev"
+  description = "Build and deploy breathe-pricing-rust to dev environment on push to main"
+  location    = var.region
+
+  github {
+    owner = var.github_owner
+    name  = "breathe-pricing-rust"
+
+    push {
+      branch = "^main$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+
+  substitutions = {
+    _IMAGE         = "europe-west2-docker.pkg.dev/${module.project.project_id}/breathe-pricing-rust/breathe-pricing-rust"
+    _DEPLOY_PROJECT = "breathe-dev-env"
+    _SERVICE_NAME   = "breathe-pricing-rust"
+    _VPC_CONNECTOR  = "projects/${module.project.project_id}/locations/${var.region}/connectors/breathe-vpc-connector"
+    _ENV_NAME       = "dev"
+  }
+
+  service_account = google_service_account.cloudbuild.id
+
+  depends_on = [module.project, google_service_account.cloudbuild]
+}
+
+# Service account for Cloud Build with necessary permissions
+resource "google_service_account" "cloudbuild" {
+  project      = module.project.project_id
+  account_id   = "sa-cloudbuild"
+  display_name = "Cloud Build Service Account"
+  description  = "Service account for Cloud Build to build and deploy services"
+
+  depends_on = [module.project]
+}
+
+# Grant Cloud Build SA permission to push to Artifact Registry
+resource "google_artifact_registry_repository_iam_member" "cloudbuild_writer" {
+  for_each = toset([
+    "breathe-ecommerce",
+    "breathe-pf-feed-processor",
+    "breathe-nginx",
+    "breathe-admin",
+    "breathe-pricing-rust",
+    "breathe-feed-puller",
+  ])
+
+  project    = module.project.project_id
+  location   = var.region
+  repository = each.value
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${google_service_account.cloudbuild.email}"
+
+  depends_on = [module.artifact_registry]
+}
+
+# Grant Cloud Build SA permission to deploy to Cloud Run in dev
+resource "google_project_iam_member" "cloudbuild_run_admin_dev" {
+  project = "breathe-dev-env"
+  role    = "roles/run.admin"
+  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+# Grant Cloud Build SA permission to act as service accounts in dev
+resource "google_project_iam_member" "cloudbuild_sa_user_dev" {
+  project = "breathe-dev-env"
+  role    = "roles/iam.serviceAccountUser"
+  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+# Grant Cloud Build SA permission to use VPC connector
+resource "google_project_iam_member" "cloudbuild_vpc_user" {
+  project = module.project.project_id
+  role    = "roles/vpcaccess.user"
+  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+# Grant Cloud Build SA logging permissions
+resource "google_project_iam_member" "cloudbuild_logs" {
+  project = module.project.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+# Grant Cloud Run service agents from environment projects permission to use VPC connector
+resource "google_project_iam_member" "cloudrun_vpc_user" {
+  for_each = toset(var.environment_project_numbers)
+
+  project = module.project.project_id
+  role    = "roles/vpcaccess.user"
+  member  = "serviceAccount:service-${each.value}@serverless-robot-prod.iam.gserviceaccount.com"
+}
+
+# Cloud Build trigger for breathe-java backend -> dev
+resource "google_cloudbuild_trigger" "backend_dev" {
+  project     = module.project.project_id
+  name        = "breathe-java-dev"
+  description = "Build and deploy breathe-java backend to dev environment on push to main"
+  location    = var.region
+
+  github {
+    owner = var.github_owner
+    name  = "breathe-java"
+
+    push {
+      branch = "^main$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+
+  substitutions = {
+    _DEPLOY_PROJECT       = "breathe-dev-env"
+    _ENV_NAME             = "dev"
+    _DB_NAME              = "breathe_dev"
+    _DEPLOY_REGION        = var.region
+    _AR_HOSTNAME          = "${var.region}-docker.pkg.dev"
+    _SHARED_PROJECT       = module.project.project_id
+    _CUSTOMER_FRONTEND_URL = "https://dev.breathebranding.co.uk"
+  }
+
+  service_account = google_service_account.cloudbuild.id
+
+  depends_on = [module.project, google_service_account.cloudbuild]
+}
+
+# =============================================================================
+# Database Schemas
+# Note: Requires Cloud SQL Proxy running locally:
+#   cloud-sql-proxy --port 5432 breathe-shared:europe-west2:breathe-db
+# Or use IAM auth:
+#   cloud-sql-proxy --auto-iam-authn breathe-shared:europe-west2:breathe-db
+# =============================================================================
+
+# PostgreSQL provider - connects via Cloud SQL Proxy on localhost
+# Run `terraform apply -target=module.database_schemas` after starting proxy
+provider "postgresql" {
+  host     = var.db_host
+  port     = var.db_port
+  username = var.db_admin_user
+  password = var.db_admin_password
+  sslmode  = "disable"  # Proxy handles SSL
+
+  # Connect to postgres database for admin operations
+  database = "postgres"
+}
+
+# Create schemas in each environment database
+module "database_schemas" {
+  source = "../../modules/database-schemas"
+
+  databases    = module.cloud_sql.database_names
+  schemas      = var.db_schemas
+  schema_owner = var.db_admin_user
+  app_user     = module.cloud_sql.app_user_name
+
+  depends_on = [module.cloud_sql]
 }

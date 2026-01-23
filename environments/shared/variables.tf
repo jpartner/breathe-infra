@@ -44,3 +44,44 @@ variable "db_availability_type" {
   type        = string
   default     = "ZONAL"
 }
+
+variable "github_owner" {
+  description = "GitHub repository owner for Cloud Build triggers"
+  type        = string
+  default     = "jpartner"
+}
+
+# =============================================================================
+# Database Schema Variables
+# =============================================================================
+
+variable "db_host" {
+  description = "Database host (localhost when using Cloud SQL Proxy)"
+  type        = string
+  default     = "localhost"
+}
+
+variable "db_port" {
+  description = "Database port"
+  type        = number
+  default     = 5432
+}
+
+variable "db_admin_user" {
+  description = "Database admin user for schema management"
+  type        = string
+  default     = "postgres"
+}
+
+variable "db_admin_password" {
+  description = "Database admin password (provide via TF_VAR_db_admin_password or -var)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "db_schemas" {
+  description = "List of schema names to create in each database"
+  type        = list(string)
+  default     = ["app"]
+}

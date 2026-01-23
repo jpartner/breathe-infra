@@ -47,3 +47,13 @@ output "buckets" {
     build_cache    = google_storage_bucket.build_cache.name
   }
 }
+
+output "database_schemas" {
+  description = "Database schemas created in each environment database"
+  value       = module.database_schemas.schemas
+}
+
+output "database_names" {
+  description = "List of database names"
+  value       = module.cloud_sql.database_names
+}
