@@ -354,7 +354,7 @@ resource "google_cloudbuild_trigger" "feed_puller_dev" {
   project     = module.project.project_id
   name        = "breathe-feed-puller-dev"
   description = "Build and deploy breathe-feed-puller job to dev environment on push to v2"
-  location    = var.region
+  location    = "global"  # Use global since GitHub connection exists there
 
   github {
     owner = var.github_owner
