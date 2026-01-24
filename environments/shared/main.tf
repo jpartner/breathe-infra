@@ -349,6 +349,46 @@ resource "google_cloudbuild_trigger" "backend_dev" {
   depends_on = [module.project, google_service_account.cloudbuild]
 }
 
+# Cloud Build trigger for breathe-gcp feed puller -> dev
+resource "google_cloudbuild_trigger" "feed_puller_dev" {
+  project     = module.project.project_id
+  name        = "breathe-feed-puller-dev"
+  description = "Build and deploy breathe-feed-puller job to dev environment on push to v2"
+  location    = var.region
+
+  github {
+    owner = var.github_owner
+    name  = "breathe-gcp"
+
+    push {
+      branch = "^v2$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+
+  substitutions = {
+    _DEPLOY_PROJECT = "breathe-dev-env"
+    _ENV_NAME       = "dev"
+    _DEPLOY_REGION  = var.region
+    _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
+    _SHARED_PROJECT = module.project.project_id
+    _JOB_NAME       = "breathe-feed-puller"
+  }
+
+  service_account = google_service_account.cloudbuild.id
+
+  depends_on = [module.project, google_service_account.cloudbuild]
+}
+
+# Grant Cloud Run Job service account access to GCS buckets in breathe-shared
+# The job needs to read from and write to breathe-pf-feeds bucket
+resource "google_storage_bucket_iam_member" "feed_puller_feeds_bucket" {
+  bucket = google_storage_bucket.feeds.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${var.dev_compute_service_account}"
+}
+
 # =============================================================================
 # Database Schemas (Optional - requires Cloud SQL Proxy)
 # To enable: terraform apply -var="manage_db_schemas=true" -var="db_admin_password=..."
