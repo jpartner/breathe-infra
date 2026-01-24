@@ -91,9 +91,3 @@ variable "db_schemas" {
   type        = list(string)
   default     = ["app"]
 }
-
-variable "dev_compute_service_account" {
-  description = "Default compute service account for breathe-dev-env (for Cloud Run Job access to GCS)"
-  type        = string
-  default     = ""
-}

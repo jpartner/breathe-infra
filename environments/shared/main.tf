@@ -1,5 +1,6 @@
 # Shared Project Infrastructure
-# Contains: Artifact Registry, Cloud SQL, shared GCS buckets, networking
+# Contains: Artifact Registry, Cloud SQL, shared GCS buckets, networking,
+#           Feed puller job (pulls once, shared across environments)
 
 terraform {
   required_version = ">= 1.5.0"
@@ -42,7 +43,10 @@ provider "google-beta" {
   region = var.region
 }
 
-# Create the shared project
+# =============================================================================
+# Project & Core Infrastructure
+# =============================================================================
+
 module "project" {
   source = "../../modules/project"
 
@@ -66,10 +70,10 @@ module "project" {
     "secretmanager.googleapis.com",
     "vpcaccess.googleapis.com",
     "storage.googleapis.com",
+    "cloudscheduler.googleapis.com",
   ]
 }
 
-# Networking
 module "networking" {
   source = "../../modules/networking"
 
@@ -79,7 +83,6 @@ module "networking" {
   depends_on = [module.project]
 }
 
-# Artifact Registry
 module "artifact_registry" {
   source = "../../modules/artifact-registry"
 
@@ -95,13 +98,15 @@ module "artifact_registry" {
     "breathe-feed-puller",
   ]
 
-  # Will be populated with environment project numbers after they're created
   reader_projects = var.environment_project_numbers
 
   depends_on = [module.project]
 }
 
-# Cloud SQL
+# =============================================================================
+# Cloud SQL (DO NOT MODIFY - data exists)
+# =============================================================================
+
 module "cloud_sql" {
   source = "../../modules/cloud-sql"
 
@@ -120,7 +125,10 @@ module "cloud_sql" {
   depends_on = [module.networking]
 }
 
-# Shared GCS buckets
+# =============================================================================
+# Shared GCS Buckets
+# =============================================================================
+
 resource "google_storage_bucket" "feeds" {
   project                     = module.project.project_id
   name                        = "breathe-pf-feeds"
@@ -213,43 +221,9 @@ resource "google_storage_bucket" "build_cache" {
 }
 
 # =============================================================================
-# Cloud Build Triggers
-# Note: GitHub connections must be set up manually in the Cloud Console first:
-# https://console.cloud.google.com/cloud-build/repositories/2nd-gen
+# Cloud Build Service Account & Permissions
 # =============================================================================
 
-# Cloud Build trigger for breathe-pricing-rust -> dev
-resource "google_cloudbuild_trigger" "pricing_rust_dev" {
-  project     = module.project.project_id
-  name        = "breathe-pricing-rust-dev"
-  description = "Build and deploy breathe-pricing-rust to dev environment on push to main"
-  location    = var.region
-
-  github {
-    owner = var.github_owner
-    name  = "breathe-pricing-rust"
-
-    push {
-      branch = "^main$"
-    }
-  }
-
-  filename = "cloudbuild.yaml"
-
-  substitutions = {
-    _IMAGE         = "europe-west2-docker.pkg.dev/${module.project.project_id}/breathe-pricing-rust/breathe-pricing-rust"
-    _DEPLOY_PROJECT = "breathe-dev-env"
-    _SERVICE_NAME   = "breathe-pricing-rust"
-    _VPC_CONNECTOR  = "projects/${module.project.project_id}/locations/${var.region}/connectors/breathe-vpc-connector"
-    _ENV_NAME       = "dev"
-  }
-
-  service_account = google_service_account.cloudbuild.id
-
-  depends_on = [module.project, google_service_account.cloudbuild]
-}
-
-# Service account for Cloud Build with necessary permissions
 resource "google_service_account" "cloudbuild" {
   project      = module.project.project_id
   account_id   = "sa-cloudbuild"
@@ -279,31 +253,46 @@ resource "google_artifact_registry_repository_iam_member" "cloudbuild_writer" {
   depends_on = [module.artifact_registry]
 }
 
-# Grant Cloud Build SA permission to deploy to Cloud Run in dev
-resource "google_project_iam_member" "cloudbuild_run_admin_dev" {
-  project = "breathe-dev-env"
-  role    = "roles/run.admin"
-  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
-}
-
-# Grant Cloud Build SA permission to act as service accounts in dev
-resource "google_project_iam_member" "cloudbuild_sa_user_dev" {
-  project = "breathe-dev-env"
-  role    = "roles/iam.serviceAccountUser"
-  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
-}
-
-# Grant Cloud Build SA permission to use VPC connector
+# Cloud Build SA permissions in shared project
 resource "google_project_iam_member" "cloudbuild_vpc_user" {
   project = module.project.project_id
   role    = "roles/vpcaccess.user"
   member  = "serviceAccount:${google_service_account.cloudbuild.email}"
 }
 
-# Grant Cloud Build SA logging permissions
 resource "google_project_iam_member" "cloudbuild_logs" {
   project = module.project.project_id
   role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+# Cloud Build SA can deploy to Cloud Run in shared (for feed puller job)
+resource "google_project_iam_member" "cloudbuild_run_admin_shared" {
+  project = module.project.project_id
+  role    = "roles/run.admin"
+  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+resource "google_project_iam_member" "cloudbuild_sa_user_shared" {
+  project = module.project.project_id
+  role    = "roles/iam.serviceAccountUser"
+  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+# Cloud Build SA permissions for each environment
+resource "google_project_iam_member" "cloudbuild_run_admin" {
+  for_each = toset(["breathe-dev-env", "breathe-staging-env", "breathe-production-env"])
+
+  project = each.value
+  role    = "roles/run.admin"
+  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+resource "google_project_iam_member" "cloudbuild_sa_user" {
+  for_each = toset(["breathe-dev-env", "breathe-staging-env", "breathe-production-env"])
+
+  project = each.value
+  role    = "roles/iam.serviceAccountUser"
   member  = "serviceAccount:${google_service_account.cloudbuild.email}"
 }
 
@@ -316,16 +305,68 @@ resource "google_project_iam_member" "cloudrun_vpc_user" {
   member  = "serviceAccount:service-${each.value}@serverless-robot-prod.iam.gserviceaccount.com"
 }
 
-# Cloud Build trigger for breathe-java backend -> dev
+# Grant environment ecommerce service accounts access to DB password secret
+resource "google_secret_manager_secret_iam_member" "db_password_accessor" {
+  for_each = toset([
+    "sa-ecommerce@breathe-dev-env.iam.gserviceaccount.com",
+    "sa-ecommerce@breathe-staging-env.iam.gserviceaccount.com",
+    "sa-ecommerce@breathe-production-env.iam.gserviceaccount.com",
+  ])
+
+  project   = module.project.project_id
+  secret_id = module.cloud_sql.password_secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${each.value}"
+}
+
+# =============================================================================
+# Cloud Build Triggers (All in europe-west2)
+# GitHub connections configured manually in Cloud Console
+# =============================================================================
+
+# Backend (breathe-java) -> dev
 resource "google_cloudbuild_trigger" "backend_dev" {
   project     = module.project.project_id
-  name        = "breathe-java-dev"
-  description = "Build and deploy breathe-java backend to dev environment on push to main"
+  name        = "breathe-backend-dev"
+  description = "Build and deploy breathe-ecommerce backend to dev on push to v2"
   location    = var.region
 
   github {
     owner = var.github_owner
     name  = "breathe-java"
+
+    push {
+      branch = "^v2$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+
+  substitutions = {
+    _DEPLOY_PROJECT        = "breathe-dev-env"
+    _ENV_NAME              = "dev"
+    _DB_NAME               = "breathe_dev"
+    _DEPLOY_REGION         = var.region
+    _AR_HOSTNAME           = "${var.region}-docker.pkg.dev"
+    _SHARED_PROJECT        = module.project.project_id
+    _CUSTOMER_FRONTEND_URL = "https://dev.breathebranding.co.uk"
+  }
+
+  service_account = google_service_account.cloudbuild.id
+
+  depends_on = [module.project, google_service_account.cloudbuild]
+}
+
+# Pricing Rust service -> dev
+resource "google_cloudbuild_trigger" "pricing_rust_dev" {
+  project     = module.project.project_id
+  name        = "breathe-pricing-rust-dev"
+  description = "Build and deploy breathe-pricing-rust to dev on push to main"
+  location    = var.region
+
+  github {
+    owner = var.github_owner
+    name  = "breathe-pricing-rust"
 
     push {
       branch = "^main$"
@@ -335,13 +376,11 @@ resource "google_cloudbuild_trigger" "backend_dev" {
   filename = "cloudbuild.yaml"
 
   substitutions = {
-    _DEPLOY_PROJECT       = "breathe-dev-env"
-    _ENV_NAME             = "dev"
-    _DB_NAME              = "breathe_dev"
-    _DEPLOY_REGION        = var.region
-    _AR_HOSTNAME          = "${var.region}-docker.pkg.dev"
-    _SHARED_PROJECT       = module.project.project_id
-    _CUSTOMER_FRONTEND_URL = "https://dev.breathebranding.co.uk"
+    _IMAGE          = "${var.region}-docker.pkg.dev/${module.project.project_id}/breathe-pricing-rust/breathe-pricing-rust"
+    _DEPLOY_PROJECT = "breathe-dev-env"
+    _SERVICE_NAME   = "breathe-pricing-rust"
+    _VPC_CONNECTOR  = "projects/${module.project.project_id}/locations/${var.region}/connectors/breathe-vpc-connector"
+    _ENV_NAME       = "dev"
   }
 
   service_account = google_service_account.cloudbuild.id
@@ -349,12 +388,12 @@ resource "google_cloudbuild_trigger" "backend_dev" {
   depends_on = [module.project, google_service_account.cloudbuild]
 }
 
-# Cloud Build trigger for breathe-gcp feed puller -> dev
-resource "google_cloudbuild_trigger" "feed_puller_dev" {
+# Feed puller job -> shared (runs once for all environments)
+resource "google_cloudbuild_trigger" "feed_puller" {
   project     = module.project.project_id
-  name        = "breathe-feed-puller-dev"
-  description = "Build and deploy breathe-feed-puller job to dev environment on push to v2"
-  location    = "global"  # Use global since GitHub connection exists there
+  name        = "breathe-feed-puller"
+  description = "Build and deploy feed puller job to shared on push to v2"
+  location    = var.region
 
   github {
     owner = var.github_owner
@@ -368,8 +407,8 @@ resource "google_cloudbuild_trigger" "feed_puller_dev" {
   filename = "cloudbuild.yaml"
 
   substitutions = {
-    _DEPLOY_PROJECT = "breathe-dev-env"
-    _ENV_NAME       = "dev"
+    _DEPLOY_PROJECT = module.project.project_id
+    _ENV_NAME       = "shared"
     _DEPLOY_REGION  = var.region
     _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
     _SHARED_PROJECT = module.project.project_id
@@ -381,45 +420,57 @@ resource "google_cloudbuild_trigger" "feed_puller_dev" {
   depends_on = [module.project, google_service_account.cloudbuild]
 }
 
-# Grant Cloud Run Job service account access to GCS buckets in breathe-shared
-# The job needs to read from and write to breathe-pf-feeds bucket
+# =============================================================================
+# Feed Puller Cloud Run Job (in breathe-shared)
+# Pulls supplier feeds once, stores in shared bucket for all environments
+# =============================================================================
+
+# Service account for the feed puller job
+resource "google_service_account" "feed_puller" {
+  project      = module.project.project_id
+  account_id   = "sa-feed-puller"
+  display_name = "Feed Puller Job"
+  description  = "Service account for the feed puller Cloud Run Job"
+
+  depends_on = [module.project]
+}
+
+# Grant feed puller access to the feeds bucket
 resource "google_storage_bucket_iam_member" "feed_puller_feeds_bucket" {
   bucket = google_storage_bucket.feeds.name
   role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${var.dev_compute_service_account}"
+  member = "serviceAccount:${google_service_account.feed_puller.email}"
 }
 
-# =============================================================================
-# Cloud Scheduler for Feed Puller Job (runs in breathe-dev-env)
-# =============================================================================
-
-# Service account for Cloud Scheduler to invoke Cloud Run Jobs
+# Service account for Cloud Scheduler to invoke the job
 resource "google_service_account" "scheduler_feed_puller" {
-  project      = "breathe-dev-env"
+  project      = module.project.project_id
   account_id   = "sa-scheduler-feed-puller"
   display_name = "Cloud Scheduler - Feed Puller"
-  description  = "Service account for Cloud Scheduler to invoke feed puller Cloud Run Job"
+  description  = "Service account for Cloud Scheduler to invoke feed puller job"
+
+  depends_on = [module.project]
 }
 
-# Grant the scheduler SA permission to invoke Cloud Run Jobs
+# Grant scheduler SA permission to invoke Cloud Run Jobs
 resource "google_project_iam_member" "scheduler_run_invoker" {
-  project = "breathe-dev-env"
+  project = module.project.project_id
   role    = "roles/run.invoker"
   member  = "serviceAccount:${google_service_account.scheduler_feed_puller.email}"
 }
 
-# Cloud Scheduler job to trigger feed puller every hour
+# Cloud Scheduler job - runs every hour
 resource "google_cloud_scheduler_job" "feed_puller" {
-  project     = "breathe-dev-env"
+  project     = module.project.project_id
   region      = var.region
   name        = "breathe-feed-puller-scheduler"
   description = "Triggers the feed puller Cloud Run Job every hour"
-  schedule    = "0 * * * *"  # Every hour at minute 0
+  schedule    = "0 * * * *"
   time_zone   = "Etc/UTC"
 
   http_target {
     http_method = "POST"
-    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/breathe-dev-env/jobs/breathe-feed-puller:run"
+    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${module.project.project_id}/jobs/breathe-feed-puller:run"
 
     oauth_token {
       service_account_email = google_service_account.scheduler_feed_puller.email
@@ -430,6 +481,8 @@ resource "google_cloud_scheduler_job" "feed_puller" {
   retry_config {
     retry_count = 1
   }
+
+  depends_on = [module.project]
 }
 
 # =============================================================================
@@ -440,8 +493,6 @@ resource "google_cloud_scheduler_job" "feed_puller" {
 #   cloud-sql-proxy --port 5432 breathe-shared:europe-west2:breathe-db
 # =============================================================================
 
-# PostgreSQL provider - only configured when manage_db_schemas is true
-# When false, provider uses dummy config that won't attempt connection
 provider "postgresql" {
   host     = var.manage_db_schemas ? var.db_host : "localhost"
   port     = var.manage_db_schemas ? var.db_port : 5432
@@ -449,12 +500,10 @@ provider "postgresql" {
   password = var.manage_db_schemas ? var.db_admin_password : "disabled"
   sslmode  = "disable"
 
-  # Only connect when enabled
   connect_timeout = var.manage_db_schemas ? 15 : 1
   database        = "postgres"
 }
 
-# Create schemas in each environment database (only when enabled)
 module "database_schemas" {
   source = "../../modules/database-schemas"
   count  = var.manage_db_schemas ? 1 : 0
