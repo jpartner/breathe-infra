@@ -390,6 +390,49 @@ resource "google_storage_bucket_iam_member" "feed_puller_feeds_bucket" {
 }
 
 # =============================================================================
+# Cloud Scheduler for Feed Puller Job (runs in breathe-dev-env)
+# =============================================================================
+
+# Service account for Cloud Scheduler to invoke Cloud Run Jobs
+resource "google_service_account" "scheduler_feed_puller" {
+  project      = "breathe-dev-env"
+  account_id   = "sa-scheduler-feed-puller"
+  display_name = "Cloud Scheduler - Feed Puller"
+  description  = "Service account for Cloud Scheduler to invoke feed puller Cloud Run Job"
+}
+
+# Grant the scheduler SA permission to invoke Cloud Run Jobs
+resource "google_project_iam_member" "scheduler_run_invoker" {
+  project = "breathe-dev-env"
+  role    = "roles/run.invoker"
+  member  = "serviceAccount:${google_service_account.scheduler_feed_puller.email}"
+}
+
+# Cloud Scheduler job to trigger feed puller every hour
+resource "google_cloud_scheduler_job" "feed_puller" {
+  project     = "breathe-dev-env"
+  region      = var.region
+  name        = "breathe-feed-puller-scheduler"
+  description = "Triggers the feed puller Cloud Run Job every hour"
+  schedule    = "0 * * * *"  # Every hour at minute 0
+  time_zone   = "Etc/UTC"
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/breathe-dev-env/jobs/breathe-feed-puller:run"
+
+    oauth_token {
+      service_account_email = google_service_account.scheduler_feed_puller.email
+      scope                 = "https://www.googleapis.com/auth/cloud-platform"
+    }
+  }
+
+  retry_config {
+    retry_count = 1
+  }
+}
+
+# =============================================================================
 # Database Schemas (Optional - requires Cloud SQL Proxy)
 # To enable: terraform apply -var="manage_db_schemas=true" -var="db_admin_password=..."
 #
