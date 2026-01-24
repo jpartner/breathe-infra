@@ -156,9 +156,33 @@ resource "google_storage_bucket" "feeds" {
   depends_on = [module.project]
 }
 
+# =============================================================================
+# Per-Environment Buckets (created in each environment project)
+# =============================================================================
+
+locals {
+  environments = {
+    dev = {
+      project = "breathe-dev-env"
+      sa      = "sa-ecommerce@breathe-dev-env.iam.gserviceaccount.com"
+    }
+    staging = {
+      project = "breathe-staging-env"
+      sa      = "sa-ecommerce@breathe-staging-env.iam.gserviceaccount.com"
+    }
+    prod = {
+      project = "breathe-production-env"
+      sa      = "sa-ecommerce@breathe-production-env.iam.gserviceaccount.com"
+    }
+  }
+}
+
+# Generated product data buckets (one per environment)
 resource "google_storage_bucket" "generated_data" {
-  project                     = module.project.project_id
-  name                        = "breathe-generated-product-data"
+  for_each = local.environments
+
+  project                     = each.value.project
+  name                        = "breathe-${each.key}-generated-product-data"
   location                    = var.region
   uniform_bucket_level_access = true
 
@@ -176,25 +200,44 @@ resource "google_storage_bucket" "generated_data" {
   }
 
   labels = {
-    purpose    = "generated-product-data"
-    managed_by = "terraform"
+    environment = each.key
+    purpose     = "generated-product-data"
+    managed_by  = "terraform"
   }
-
-  depends_on = [module.project]
 }
 
+# Grant ecommerce SA access to generated data bucket
+resource "google_storage_bucket_iam_member" "generated_data_access" {
+  for_each = local.environments
+
+  bucket = google_storage_bucket.generated_data[each.key].name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${each.value.sa}"
+}
+
+# Product images buckets (one per environment)
 resource "google_storage_bucket" "images" {
-  project                     = module.project.project_id
-  name                        = "breathe-product-images"
+  for_each = local.environments
+
+  project                     = each.value.project
+  name                        = "breathe-${each.key}-product-images"
   location                    = var.region
   uniform_bucket_level_access = true
 
   labels = {
-    purpose    = "product-images"
-    managed_by = "terraform"
+    environment = each.key
+    purpose     = "product-images"
+    managed_by  = "terraform"
   }
+}
 
-  depends_on = [module.project]
+# Grant ecommerce SA access to images bucket
+resource "google_storage_bucket_iam_member" "images_access" {
+  for_each = local.environments
+
+  bucket = google_storage_bucket.images[each.key].name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${each.value.sa}"
 }
 
 resource "google_storage_bucket" "build_cache" {

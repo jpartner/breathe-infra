@@ -41,10 +41,18 @@ output "network_id" {
 output "buckets" {
   description = "Shared bucket names"
   value = {
-    feeds          = google_storage_bucket.feeds.name
-    generated_data = google_storage_bucket.generated_data.name
-    images         = google_storage_bucket.images.name
-    build_cache    = google_storage_bucket.build_cache.name
+    feeds       = google_storage_bucket.feeds.name
+    build_cache = google_storage_bucket.build_cache.name
+  }
+}
+
+output "environment_buckets" {
+  description = "Per-environment bucket names"
+  value = {
+    for env, _ in local.environments : env => {
+      generated_data = google_storage_bucket.generated_data[env].name
+      images         = google_storage_bucket.images[env].name
+    }
   }
 }
 
