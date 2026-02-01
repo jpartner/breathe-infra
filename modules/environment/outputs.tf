@@ -16,5 +16,17 @@ output "buckets" {
     artwork_processed = google_storage_bucket.artwork_processed.name
     basket_storage    = google_storage_bucket.basket_storage.name
     cost_pricing      = google_storage_bucket.cost_pricing.name
+    config            = google_storage_bucket.config.name
+    pf_feeds          = google_storage_bucket.pf_feeds.name
   }
+}
+
+output "config_url" {
+  description = "GCS URL to the environment configuration file"
+  value       = "gs://${google_storage_bucket.config.name}/${google_storage_bucket_object.config.name}"
+}
+
+output "config_bucket" {
+  description = "Name of the config bucket"
+  value       = google_storage_bucket.config.name
 }

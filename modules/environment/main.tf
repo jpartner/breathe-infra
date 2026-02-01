@@ -120,6 +120,23 @@ resource "google_storage_bucket" "cost_pricing" {
   }
 }
 
+resource "google_storage_bucket" "pf_feeds" {
+  project                     = var.project_id
+  name                        = "${local.env_prefix}-pf-feeds"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = var.environment != "production"
+
+  versioning {
+    enabled = true
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+}
+
 # IAM bindings for ecommerce service account
 resource "google_project_iam_member" "ecommerce_sql" {
   project = var.shared_project_id
@@ -166,8 +183,8 @@ resource "google_project_iam_member" "feed_processor_sql" {
 }
 
 resource "google_storage_bucket_iam_member" "feed_processor_feeds" {
-  bucket = var.shared_feeds_bucket
-  role   = "roles/storage.objectViewer"
+  bucket = google_storage_bucket.pf_feeds.name
+  role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.feed_processor.email}"
 }
 
@@ -179,6 +196,12 @@ resource "google_storage_bucket_iam_member" "feed_processor_generated" {
 
 resource "google_storage_bucket_iam_member" "feed_processor_images" {
   bucket = var.shared_images_bucket
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.feed_processor.email}"
+}
+
+resource "google_storage_bucket_iam_member" "feed_processor_cost_pricing" {
+  bucket = google_storage_bucket.cost_pricing.name
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.feed_processor.email}"
 }
@@ -203,4 +226,102 @@ resource "google_secret_manager_secret_iam_member" "feed_processor_db_password" 
   secret_id = var.db_password_secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.feed_processor.email}"
+}
+
+# =============================================================================
+# Configuration Bucket and File
+# =============================================================================
+
+# Config bucket for storing environment configuration
+resource "google_storage_bucket" "config" {
+  project                     = var.project_id
+  name                        = "${local.env_prefix}-config"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = var.environment != "production"
+
+  versioning {
+    enabled = true
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+    purpose     = "service-configuration"
+  }
+}
+
+# Environment configuration file (non-secret values only)
+resource "google_storage_bucket_object" "config" {
+  name         = "config.json"
+  bucket       = google_storage_bucket.config.name
+  content_type = "application/json"
+
+  content = jsonencode({
+    environment = var.environment
+    projectId   = var.project_id
+
+    database = {
+      host           = var.db_private_ip
+      name           = "breathe_${var.environment}"
+      user           = var.db_user
+      connectionName = var.db_connection_name
+    }
+
+    buckets = {
+      # Shared buckets (cross-environment)
+      generatedData = var.shared_generated_data_bucket
+      images        = var.shared_images_bucket
+
+      # Environment-specific buckets
+      feeds            = google_storage_bucket.pf_feeds.name
+      artworkUploaded  = google_storage_bucket.artwork_uploaded.name
+      artworkProcessed = google_storage_bucket.artwork_processed.name
+      basketStorage    = google_storage_bucket.basket_storage.name
+      costPricing      = google_storage_bucket.cost_pricing.name
+      config           = google_storage_bucket.config.name
+    }
+
+    services = {
+      customerFrontendUrl = var.customer_frontend_url
+      typesenseHost       = var.typesense_host
+      ecommerceUrl        = var.ecommerce_url
+    }
+
+    vpcConnector = var.vpc_connector_id
+
+    features = {
+      enableImageCache = var.enable_image_cache
+    }
+
+    secrets = {
+      # Reference paths - services should mount these from Secret Manager
+      dbPassword = "projects/${var.shared_project_id}/secrets/${var.db_password_secret_id}/versions/latest"
+    }
+  })
+}
+
+# Grant config bucket read access to all service accounts
+resource "google_storage_bucket_iam_member" "config_ecommerce" {
+  bucket = google_storage_bucket.config.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.ecommerce.email}"
+}
+
+resource "google_storage_bucket_iam_member" "config_feed_processor" {
+  bucket = google_storage_bucket.config.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.feed_processor.email}"
+}
+
+resource "google_storage_bucket_iam_member" "config_nginx" {
+  bucket = google_storage_bucket.config.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.nginx.email}"
+}
+
+resource "google_storage_bucket_iam_member" "config_admin" {
+  bucket = google_storage_bucket.config.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.admin.email}"
 }
