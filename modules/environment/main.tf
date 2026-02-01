@@ -325,3 +325,32 @@ resource "google_storage_bucket_iam_member" "config_admin" {
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${google_service_account.admin.email}"
 }
+
+# =============================================================================
+# Cloud Scheduler for Feed Processor
+# =============================================================================
+
+resource "google_cloud_scheduler_job" "feed_processor" {
+  name        = "pffeedprocessor-scheduler"
+  project     = var.project_id
+  region      = var.region
+  description = "Runs feed processor hourly to check for feed updates and process product data"
+  schedule    = "0 * * * *"
+  time_zone   = "Etc/UTC"
+
+  http_target {
+    uri         = "https://${var.region}-run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/jobs/pffeedprocessor:run"
+    http_method = "POST"
+
+    oauth_token {
+      service_account_email = google_service_account.scheduler.email
+      scope                 = "https://www.googleapis.com/auth/cloud-platform"
+    }
+  }
+
+  retry_config {
+    min_backoff_duration = "5s"
+    max_backoff_duration = "3600s"
+    max_doublings        = 5
+  }
+}
