@@ -162,6 +162,12 @@ resource "google_storage_bucket_iam_member" "ecommerce_artwork_uploaded" {
   member = "serviceAccount:${google_service_account.ecommerce.email}"
 }
 
+resource "google_storage_bucket_iam_member" "ecommerce_artwork_processed" {
+  bucket = google_storage_bucket.artwork_processed.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.ecommerce.email}"
+}
+
 # IAM bindings for nginx service account (shared buckets)
 resource "google_storage_bucket_iam_member" "nginx_generated_data" {
   bucket = var.shared_generated_data_bucket
