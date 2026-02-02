@@ -70,6 +70,7 @@ module "environment" {
   db_private_ip      = var.db_private_ip
   db_connection_name = var.db_connection_name
   db_user            = var.db_user
+  db_name            = var.db_name
 
   # VPC configuration
   vpc_connector_id = var.vpc_connector_id

@@ -7,6 +7,7 @@ shared_images_bucket         = "breathe-staging-product-images"
 # Database configuration (from shared project)
 db_private_ip      = "10.219.0.3"
 db_connection_name = "breathe-shared:europe-west2:breathe-db"
+db_user            = "breathe_app"
 
 # VPC configuration
 vpc_connector_id = "projects/breathe-shared/locations/europe-west2/connectors/breathe-vpc-connector"

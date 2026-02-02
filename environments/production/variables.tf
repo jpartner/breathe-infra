@@ -67,6 +67,12 @@ variable "db_user" {
   default     = "postgres"
 }
 
+variable "db_name" {
+  description = "Database name (defaults to breathe_{environment})"
+  type        = string
+  default     = ""
+}
+
 # VPC configuration
 variable "vpc_connector_id" {
   description = "Full VPC connector ID"

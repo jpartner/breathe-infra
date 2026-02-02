@@ -3,6 +3,7 @@
 
 locals {
   env_prefix = "breathe-${var.environment}"
+  db_name    = var.db_name != "" ? var.db_name : "breathe_${var.environment}"
 }
 
 # Service Accounts with minimal permissions
@@ -269,7 +270,7 @@ resource "google_storage_bucket_object" "config" {
 
     database = {
       host           = var.db_private_ip
-      name           = "breathe_${var.environment}"
+      name           = local.db_name
       user           = var.db_user
       connectionName = var.db_connection_name
     }
