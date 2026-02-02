@@ -62,24 +62,30 @@ steps:
         ./gradlew :e2e-tests:test --no-daemon 2>&1 | tee /workspace/test-output.txt
         TEST_EXIT_CODE=$$?
 
-        # Parse test results from JUnit XML reports (more reliable than console output)
+        # Parse test results from JUnit XML reports (using portable regex)
         REPORT_DIR="e2e-tests/build/test-results/test"
-        if [ -d "$$REPORT_DIR" ]; then
-          # Count tests and failures from XML files
-          TOTAL_TESTS=$$(grep -h 'tests=' $$REPORT_DIR/*.xml 2>/dev/null | grep -oP 'tests="\K\d+' | awk '{s+=$$1} END {print s}')
-          TOTAL_FAILURES=$$(grep -h 'failures=' $$REPORT_DIR/*.xml 2>/dev/null | grep -oP 'failures="\K\d+' | awk '{s+=$$1} END {print s}')
-          TOTAL_ERRORS=$$(grep -h 'errors=' $$REPORT_DIR/*.xml 2>/dev/null | grep -oP 'errors="\K\d+' | awk '{s+=$$1} END {print s}')
+        if [ -d "$$REPORT_DIR" ] && ls $$REPORT_DIR/*.xml 1>/dev/null 2>&1; then
+          # Use sed to extract values (more portable than grep -oP)
+          TOTAL_TESTS=$$(grep -h 'tests=' $$REPORT_DIR/*.xml 2>/dev/null | sed 's/.*tests="\([0-9]*\)".*/\1/' | awk '{s+=$$1} END {print s+0}')
+          TOTAL_FAILURES=$$(grep -h 'failures=' $$REPORT_DIR/*.xml 2>/dev/null | sed 's/.*failures="\([0-9]*\)".*/\1/' | awk '{s+=$$1} END {print s+0}')
+          TOTAL_ERRORS=$$(grep -h 'errors=' $$REPORT_DIR/*.xml 2>/dev/null | sed 's/.*errors="\([0-9]*\)".*/\1/' | awk '{s+=$$1} END {print s+0}')
 
           TESTS_FAILED=$$((TOTAL_FAILURES + TOTAL_ERRORS))
           TESTS_PASSED=$$((TOTAL_TESTS - TESTS_FAILED))
         else
-          # Fallback to parsing console output
+          # Fallback: parse from console output
           if grep -q "BUILD SUCCESSFUL" /workspace/test-output.txt; then
-            TESTS_PASSED="all"
+            # Extract count from "X tests completed" if available
+            TESTS_PASSED=$$(grep -o '[0-9]* tests completed' /workspace/test-output.txt | tail -1 | grep -o '[0-9]*' || echo "all")
             TESTS_FAILED="0"
           else
-            TESTS_PASSED=$$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "?")
-            TESTS_FAILED=$$(grep -oP '\d+(?= failed)' /workspace/test-output.txt | tail -1 || echo "?")
+            # Parse "X tests completed, Y failed" format
+            TESTS_PASSED=$$(grep -o '[0-9]* tests completed' /workspace/test-output.txt | tail -1 | grep -o '[0-9]*' || echo "?")
+            TESTS_FAILED=$$(grep -o '[0-9]* failed' /workspace/test-output.txt | tail -1 | grep -o '[0-9]*' || echo "?")
+            # Calculate passed from completed - failed
+            if [ "$$TESTS_PASSED" != "?" ] && [ "$$TESTS_FAILED" != "?" ]; then
+              TESTS_PASSED=$$((TESTS_PASSED - TESTS_FAILED))
+            fi
           fi
         fi
 
