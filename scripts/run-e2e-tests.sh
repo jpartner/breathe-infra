@@ -11,8 +11,8 @@
 # If commit_sha is not provided, it will be extracted from the currently
 # deployed Cloud Run service.
 #
-# Slack notifications are sent using the bot token and channel ID from
-# the environment's config.json (same as the ecommerce service uses).
+# Slack notifications are sent to the deployments channel using config
+# from the environment's config.json in GCS.
 
 set -e
 
@@ -84,14 +84,13 @@ echo ""
 echo "Starting E2E tests..."
 echo "========================================"
 
-# Trigger Cloud Build
-gcloud builds submit \
+# Run the trigger with the specified commit
+gcloud builds triggers run e2e-tests-manual \
   --project="breathe-shared" \
-  --config="cloudbuild/e2e-tests.yaml" \
-  --substitutions="_ENVIRONMENT=${ENVIRONMENT},_COMMIT_SHA=${COMMIT_SHA},_ECOMMERCE_URL=${ECOMMERCE_URL},_CONFIG_BUCKET=${CONFIG_BUCKET}" \
-  --no-source \
-  --async
+  --region="europe-west2" \
+  --sha="${COMMIT_SHA}" \
+  --substitutions="_ENVIRONMENT=${ENVIRONMENT},_ECOMMERCE_URL=${ECOMMERCE_URL},_CONFIG_BUCKET=${CONFIG_BUCKET}"
 
 echo ""
-echo "Build submitted. View progress at:"
-echo "https://console.cloud.google.com/cloud-build/builds?project=breathe-shared"
+echo "Build triggered. View progress at:"
+echo "https://console.cloud.google.com/cloud-build/builds?project=breathe-shared&region=europe-west2"

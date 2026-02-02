@@ -1,18 +1,19 @@
 # Cloud Build configuration for running E2E tests against deployed environments
 #
+# This config is used via a trigger that provides the source from GitHub.
+# The trigger clones the repo, so we don't need to clone manually.
+#
 # Substitution variables:
 #   _ENVIRONMENT: Target environment (dev, staging)
 #   _COMMIT_SHA: Git commit hash of the deployed version to test
 #   _ECOMMERCE_URL: URL of the ecommerce service to test against
 #   _CONFIG_BUCKET: Config bucket name (e.g., breathe-staging-config)
 #
-# Slack config (bot token and channel ID) is read from the environment's
-# config.json in GCS, matching the ecommerce service configuration.
-#
-# Usage:
-#   gcloud builds submit --config=cloudbuild/e2e-tests.yaml \
-#     --substitutions=_ENVIRONMENT=staging,_COMMIT_SHA=abc123,_ECOMMERCE_URL=https://...,_CONFIG_BUCKET=breathe-staging-config \
-#     --no-source
+# Usage (via trigger):
+#   gcloud builds triggers run e2e-tests-manual \
+#     --project=breathe-shared --region=europe-west2 \
+#     --sha=<commit> \
+#     --substitutions=_ENVIRONMENT=dev,_ECOMMERCE_URL=https://...,_CONFIG_BUCKET=breathe-dev-config
 
 timeout: 1800s  # 30 minutes max
 
@@ -27,20 +28,7 @@ options:
   machineType: E2_HIGHCPU_8
 
 steps:
-  # Step 1: Clone the backend repo at the specific commit
-  - name: 'gcr.io/cloud-builders/git'
-    id: 'clone-repo'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        git clone https://github.com/jpartner/breathe-backend.git /workspace/backend
-        cd /workspace/backend
-        git checkout ${_COMMIT_SHA}
-        echo "Checked out commit: $(git rev-parse HEAD)"
-        echo "Commit message: $(git log -1 --pretty=%B)"
-
-  # Step 2: Fetch config from GCS
+  # Step 1: Fetch config from GCS
   - name: 'gcr.io/cloud-builders/gsutil'
     id: 'fetch-config'
     entrypoint: 'bash'
@@ -51,10 +39,9 @@ steps:
         gsutil cp gs://${_CONFIG_BUCKET}/config.json /workspace/config.json
         echo "Config loaded successfully"
 
-  # Step 3: Run the E2E tests
+  # Step 2: Run the E2E tests
   - name: 'gradle:8.6-jdk21'
     id: 'run-tests'
-    dir: '/workspace/backend'
     entrypoint: 'bash'
     env:
       - 'E2E_BASE_URL=${_ECOMMERCE_URL}'
@@ -67,20 +54,20 @@ steps:
         echo "=============================================="
         echo "Running E2E tests against ${_ENVIRONMENT}"
         echo "Target URL: $${E2E_BASE_URL}"
-        echo "Commit: ${_COMMIT_SHA}"
+        echo "Commit: ${COMMIT_SHA}"
         echo "=============================================="
 
         # Run tests and capture exit code
         ./gradlew :e2e-tests:test --no-daemon 2>&1 | tee /workspace/test-output.txt
-        TEST_EXIT_CODE=$?
+        TEST_EXIT_CODE=$$?
 
         # Parse test results from Gradle output
         if grep -q "BUILD SUCCESSFUL" /workspace/test-output.txt; then
-          TESTS_PASSED=$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "0")
+          TESTS_PASSED=$$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "0")
           TESTS_FAILED="0"
         else
-          TESTS_PASSED=$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "0")
-          TESTS_FAILED=$(grep -oP '\d+(?= failed)' /workspace/test-output.txt | tail -1 || echo "?")
+          TESTS_PASSED=$$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "0")
+          TESTS_FAILED=$$(grep -oP '\d+(?= failed)' /workspace/test-output.txt | tail -1 || echo "?")
         fi
 
         # Write results for notification step
@@ -93,7 +80,7 @@ steps:
 
         exit 0  # Always succeed so we can send notification
 
-  # Step 4: Send Slack notification using config from GCS
+  # Step 3: Send Slack notification using config from GCS
   - name: 'gcr.io/cloud-builders/curl'
     id: 'notify-slack'
     entrypoint: 'bash'
@@ -126,8 +113,8 @@ steps:
         fi
 
         # Build Slack message
-        COMMIT_SHORT=$$(echo "${_COMMIT_SHA}" | cut -c1-8)
-        BUILD_URL="https://console.cloud.google.com/cloud-build/builds;region=global/$${BUILD_ID}?project=$${PROJECT_ID}"
+        COMMIT_SHORT=$$(echo "${COMMIT_SHA}" | cut -c1-8)
+        BUILD_URL="https://console.cloud.google.com/cloud-build/builds;region=europe-west2/$${BUILD_ID}?project=breathe-shared"
 
         cat > /workspace/slack-payload.json << SLACK_EOF
         {
@@ -153,7 +140,7 @@ steps:
                     },
                     {
                       "type": "mrkdwn",
-                      "text": "*Commit:*\n<https://github.com/jpartner/breathe-backend/commit/${_COMMIT_SHA}|$${COMMIT_SHORT}>"
+                      "text": "*Commit:*\n<https://github.com/jpartner/breathe-java/commit/${COMMIT_SHA}|$${COMMIT_SHORT}>"
                     },
                     {
                       "type": "mrkdwn",
@@ -194,7 +181,7 @@ steps:
           echo "Response: $$RESPONSE"
         fi
 
-  # Step 5: Fail the build if tests failed (after notification)
+  # Step 4: Fail the build if tests failed (after notification)
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'check-results'
     entrypoint: 'bash'
