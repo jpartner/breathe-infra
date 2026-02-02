@@ -30,3 +30,13 @@ output "config_bucket" {
   description = "Name of the config bucket"
   value       = google_storage_bucket.config.name
 }
+
+output "ecommerce_service_url" {
+  description = "URL of the ecommerce Cloud Run service"
+  value       = google_cloud_run_v2_service.ecommerce.uri
+}
+
+output "feed_processor_job_name" {
+  description = "Name of the feed processor Cloud Run job"
+  value       = google_cloud_run_v2_job.feed_processor.name
+}

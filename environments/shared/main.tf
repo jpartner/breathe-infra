@@ -379,7 +379,7 @@ resource "google_cloudbuild_trigger" "backend_dev" {
     name  = "breathe-java"
 
     push {
-      branch = "^v2$"
+      branch = "^feed-processor-refactor$"
     }
   }
 

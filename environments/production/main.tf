@@ -66,6 +66,26 @@ module "environment" {
   shared_images_bucket         = var.shared_images_bucket
   db_password_secret_id        = var.db_password_secret_id
 
+  # Database configuration
+  db_private_ip      = var.db_private_ip
+  db_connection_name = var.db_connection_name
+  db_user            = var.db_user
+
+  # VPC configuration
+  vpc_connector_id = var.vpc_connector_id
+
+  # Service URLs
+  customer_frontend_url = var.customer_frontend_url
+  typesense_host        = var.typesense_host
+  ecommerce_url         = var.ecommerce_url
+
+  # Feature flags
+  enable_image_cache = var.enable_image_cache
+
+  # Container image tags
+  ecommerce_image_tag      = var.ecommerce_image_tag
+  feed_processor_image_tag = var.feed_processor_image_tag
+
   depends_on = [module.project]
 }
 

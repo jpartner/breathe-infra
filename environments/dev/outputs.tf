@@ -17,3 +17,13 @@ output "buckets" {
   description = "Environment bucket names"
   value       = module.environment.buckets
 }
+
+output "config_url" {
+  description = "GCS URL to the environment configuration file"
+  value       = module.environment.config_url
+}
+
+output "config_bucket" {
+  description = "Name of the config bucket"
+  value       = module.environment.config_bucket
+}

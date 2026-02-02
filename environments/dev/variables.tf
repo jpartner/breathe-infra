@@ -51,3 +51,65 @@ variable "db_password_secret_id" {
   type        = string
   default     = "db-password"
 }
+
+# Database configuration
+variable "db_private_ip" {
+  description = "Cloud SQL private IP address"
+  type        = string
+}
+
+variable "db_connection_name" {
+  description = "Cloud SQL connection name"
+  type        = string
+}
+
+variable "db_user" {
+  description = "Database user"
+  type        = string
+  default     = "postgres"
+}
+
+# VPC configuration
+variable "vpc_connector_id" {
+  description = "Full VPC connector ID"
+  type        = string
+}
+
+# Service URLs
+variable "customer_frontend_url" {
+  description = "Customer frontend URL"
+  type        = string
+  default     = "https://dev.breathebranding.co.uk"
+}
+
+variable "typesense_host" {
+  description = "Typesense host URL"
+  type        = string
+  default     = ""
+}
+
+variable "ecommerce_url" {
+  description = "Ecommerce service URL"
+  type        = string
+  default     = ""
+}
+
+# Feature flags
+variable "enable_image_cache" {
+  description = "Enable image caching for feed processor"
+  type        = bool
+  default     = true
+}
+
+# Container image tags
+variable "ecommerce_image_tag" {
+  description = "Tag for the ecommerce Docker image"
+  type        = string
+  default     = "latest"
+}
+
+variable "feed_processor_image_tag" {
+  description = "Tag for the feed processor Docker image"
+  type        = string
+  default     = "latest"
+}

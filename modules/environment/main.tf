@@ -359,4 +359,160 @@ resource "google_cloud_scheduler_job" "feed_processor" {
     max_backoff_duration = "3600s"
     max_doublings        = 5
   }
+
+  depends_on = [google_cloud_run_v2_job.feed_processor]
+}
+
+# =============================================================================
+# Cloud Run Service - Ecommerce
+# =============================================================================
+
+resource "google_cloud_run_v2_service" "ecommerce" {
+  name     = "breathe-ecommerce"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  template {
+    service_account = google_service_account.ecommerce.email
+
+    vpc_access {
+      connector = var.vpc_connector_id
+      egress    = "PRIVATE_RANGES_ONLY"
+    }
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/breathe-ecommerce/breathe-ecommerce:${var.ecommerce_image_tag}"
+
+      ports {
+        container_port = 8080
+      }
+
+      resources {
+        limits = {
+          cpu    = "2"
+          memory = "1Gi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      env {
+        name  = "CONFIG_BUCKET"
+        value = google_storage_bucket.config.name
+      }
+
+      env {
+        name = "DB_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/${var.db_password_secret_id}"
+            version = "latest"
+          }
+        }
+      }
+
+      startup_probe {
+        tcp_socket {
+          port = 8080
+        }
+        initial_delay_seconds = 10
+        timeout_seconds       = 240
+        period_seconds        = 10
+        failure_threshold     = 24
+      }
+    }
+
+    timeout = "300s"
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+}
+
+# Grant scheduler ability to invoke the ecommerce service
+resource "google_cloud_run_v2_service_iam_member" "ecommerce_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.ecommerce.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# =============================================================================
+# Cloud Run Job - Feed Processor
+# =============================================================================
+
+resource "google_cloud_run_v2_job" "feed_processor" {
+  name     = "pffeedprocessor"
+  project  = var.project_id
+  location = var.region
+
+  template {
+    task_count  = 1
+    parallelism = 1
+
+    template {
+      service_account = google_service_account.feed_processor.email
+      timeout         = "3600s"
+      max_retries     = 3
+
+      vpc_access {
+        connector = var.vpc_connector_id
+        egress    = "PRIVATE_RANGES_ONLY"
+      }
+
+      containers {
+        image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/breathe-pf-feed-processor/breathe-pf-feed-processor:${var.feed_processor_image_tag}"
+
+        resources {
+          limits = {
+            cpu    = "8"
+            memory = "4Gi"
+          }
+        }
+
+        env {
+          name  = "CONFIG_BUCKET"
+          value = google_storage_bucket.config.name
+        }
+
+        env {
+          name  = "ENABLE_IMAGE_CACHE"
+          value = tostring(var.enable_image_cache)
+        }
+
+        env {
+          name = "DB_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/${var.db_password_secret_id}"
+              version = "latest"
+            }
+          }
+        }
+      }
+    }
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+}
+
+# Grant scheduler ability to invoke the feed processor job
+resource "google_cloud_run_v2_job_iam_member" "feed_processor_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_job.feed_processor.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.scheduler.email}"
 }
