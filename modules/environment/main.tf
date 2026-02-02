@@ -373,6 +373,15 @@ resource "google_cloud_run_v2_service" "ecommerce" {
   location = var.region
   ingress  = "INGRESS_TRAFFIC_ALL"
 
+  # Ignore image changes - deployments are managed via admin tool/CI, not Terraform
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
   template {
     service_account = google_service_account.ecommerce.email
 
@@ -454,6 +463,15 @@ resource "google_cloud_run_v2_job" "feed_processor" {
   name     = "pffeedprocessor"
   project  = var.project_id
   location = var.region
+
+  # Ignore image changes - deployments are managed via admin tool/CI, not Terraform
+  lifecycle {
+    ignore_changes = [
+      template[0].template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
 
   template {
     task_count  = 1

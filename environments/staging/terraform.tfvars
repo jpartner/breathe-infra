@@ -13,3 +13,7 @@ vpc_connector_id = "projects/breathe-shared/locations/europe-west2/connectors/br
 
 # Service URLs
 customer_frontend_url = "https://staging.breathebranding.co.uk"
+
+# Container image tags - use same version as dev initially
+ecommerce_image_tag      = "6205fe59c43bf021322016302e5351a0e656b3ff"
+feed_processor_image_tag = "6205fe59c43bf021322016302e5351a0e656b3ff"
