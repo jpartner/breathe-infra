@@ -442,10 +442,10 @@ resource "google_cloud_run_v2_service" "ecommerce" {
         tcp_socket {
           port = 8080
         }
-        initial_delay_seconds = 10
-        timeout_seconds       = 240
+        initial_delay_seconds = 5
+        timeout_seconds       = 5
         period_seconds        = 10
-        failure_threshold     = 24
+        failure_threshold     = 30  # 30 * 10s = 5 minutes max startup time
       }
     }
 
