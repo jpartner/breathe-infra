@@ -1,0 +1,334 @@
+# Cloud Build configuration for blue-green deployment with E2E tests
+#
+# This pipeline:
+# 1. Deploys a new Cloud Run revision WITHOUT routing traffic
+# 2. Runs E2E tests against the new revision directly
+# 3. If tests pass: routes traffic to the new revision
+# 4. If tests fail: keeps traffic on the old revision, sends failure notification
+#
+# Usage:
+#   gcloud builds submit --config=cloudbuild/deploy-with-tests.yaml \
+#     --substitutions=_ENVIRONMENT=staging,_COMMIT_SHA=abc123,_SERVICE=breathe-ecommerce \
+#     --no-source
+#
+# Or use the helper script:
+#   ./scripts/deploy-with-tests.sh staging abc123
+
+timeout: 2400s  # 40 minutes max
+
+substitutions:
+  _ENVIRONMENT: ''
+  _COMMIT_SHA: ''
+  _SERVICE: 'breathe-ecommerce'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  # Step 1: Determine project and config based on environment
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'setup-env'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        case "${_ENVIRONMENT}" in
+          dev)
+            echo "breathe-dev-env" > /workspace/project-id.txt
+            echo "breathe-dev-config" > /workspace/config-bucket.txt
+            ;;
+          staging)
+            echo "breathe-staging-env" > /workspace/project-id.txt
+            echo "breathe-staging-config" > /workspace/config-bucket.txt
+            ;;
+          *)
+            echo "Error: Environment must be 'dev' or 'staging'"
+            exit 1
+            ;;
+        esac
+        echo "Environment: ${_ENVIRONMENT}"
+        echo "Project: $$(cat /workspace/project-id.txt)"
+
+  # Step 2: Get current serving revision (for potential rollback info)
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'get-current-revision'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        PROJECT_ID=$$(cat /workspace/project-id.txt)
+
+        CURRENT_REVISION=$$(gcloud run services describe ${_SERVICE} \
+          --project=$${PROJECT_ID} \
+          --region=europe-west2 \
+          --format="value(status.traffic[0].revisionName)" 2>/dev/null || echo "none")
+
+        echo "$${CURRENT_REVISION}" > /workspace/current-revision.txt
+        echo "Current serving revision: $${CURRENT_REVISION}"
+
+  # Step 3: Deploy new revision WITHOUT traffic
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'deploy-no-traffic'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        PROJECT_ID=$$(cat /workspace/project-id.txt)
+        CONFIG_BUCKET=$$(cat /workspace/config-bucket.txt)
+
+        echo "Deploying ${_SERVICE} with commit ${_COMMIT_SHA} (no traffic)..."
+
+        gcloud run deploy ${_SERVICE} \
+          --project=$${PROJECT_ID} \
+          --region=europe-west2 \
+          --image=europe-west2-docker.pkg.dev/breathe-shared/breathe-ecommerce/breathe-ecommerce:${_COMMIT_SHA} \
+          --no-traffic \
+          --tag=test-${_COMMIT_SHA:0:8}
+
+        # Get the new revision name
+        NEW_REVISION=$$(gcloud run revisions list \
+          --service=${_SERVICE} \
+          --project=$${PROJECT_ID} \
+          --region=europe-west2 \
+          --sort-by=~creationTimestamp \
+          --limit=1 \
+          --format="value(name)")
+
+        echo "$${NEW_REVISION}" > /workspace/new-revision.txt
+        echo "Deployed new revision: $${NEW_REVISION}"
+
+        # Get the tagged URL for testing
+        TAG_URL=$$(gcloud run services describe ${_SERVICE} \
+          --project=$${PROJECT_ID} \
+          --region=europe-west2 \
+          --format="value(status.traffic[?tag=='test-${_COMMIT_SHA:0:8}'].url)")
+
+        echo "$${TAG_URL}" > /workspace/test-url.txt
+        echo "Test URL: $${TAG_URL}"
+
+  # Step 4: Fetch config from GCS
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'fetch-config'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        CONFIG_BUCKET=$$(cat /workspace/config-bucket.txt)
+        echo "Fetching config from gs://$${CONFIG_BUCKET}/config.json"
+        gsutil cp gs://$${CONFIG_BUCKET}/config.json /workspace/config.json
+        echo "Config loaded successfully"
+
+  # Step 5: Clone backend repo and run E2E tests against new revision
+  - name: 'gcr.io/cloud-builders/git'
+    id: 'clone-repo'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        git clone https://github.com/jpartner/breathe-backend.git /workspace/backend
+        cd /workspace/backend
+        git checkout ${_COMMIT_SHA}
+        echo "Checked out commit: $$(git rev-parse HEAD)"
+
+  - name: 'gradle:8.6-jdk21'
+    id: 'run-tests'
+    dir: '/workspace/backend'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set +e  # Don't exit on test failure
+
+        TEST_URL=$$(cat /workspace/test-url.txt)
+
+        echo "=============================================="
+        echo "Running E2E tests against NEW revision"
+        echo "Environment: ${_ENVIRONMENT}"
+        echo "Test URL: $${TEST_URL}"
+        echo "Commit: ${_COMMIT_SHA}"
+        echo "=============================================="
+
+        export E2E_BASE_URL="$${TEST_URL}"
+        export GRADLE_USER_HOME=/workspace/.gradle
+
+        ./gradlew :e2e-tests:test --no-daemon 2>&1 | tee /workspace/test-output.txt
+        TEST_EXIT_CODE=$$?
+
+        # Parse test results
+        if grep -q "BUILD SUCCESSFUL" /workspace/test-output.txt; then
+          TESTS_PASSED=$$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "0")
+          TESTS_FAILED="0"
+        else
+          TESTS_PASSED=$$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "0")
+          TESTS_FAILED=$$(grep -oP '\d+(?= failed)' /workspace/test-output.txt | tail -1 || echo "?")
+        fi
+
+        echo "$${TEST_EXIT_CODE}" > /workspace/test-exit-code.txt
+        echo "$${TESTS_PASSED}" > /workspace/tests-passed.txt
+        echo "$${TESTS_FAILED}" > /workspace/tests-failed.txt
+
+        echo ""
+        echo "Test results: $${TESTS_PASSED} passed, $${TESTS_FAILED} failed"
+
+        exit 0  # Continue to traffic routing step
+
+  # Step 6: Route traffic based on test results
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'route-traffic'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        PROJECT_ID=$$(cat /workspace/project-id.txt)
+        TEST_EXIT_CODE=$$(cat /workspace/test-exit-code.txt)
+        NEW_REVISION=$$(cat /workspace/new-revision.txt)
+        CURRENT_REVISION=$$(cat /workspace/current-revision.txt)
+
+        if [ "$${TEST_EXIT_CODE}" = "0" ]; then
+          echo "=============================================="
+          echo "E2E TESTS PASSED - Switching traffic to new revision"
+          echo "=============================================="
+
+          gcloud run services update-traffic ${_SERVICE} \
+            --project=$${PROJECT_ID} \
+            --region=europe-west2 \
+            --to-revisions=$${NEW_REVISION}=100
+
+          echo "SUCCESS" > /workspace/deployment-status.txt
+          echo "Traffic now routing to: $${NEW_REVISION}"
+        else
+          echo "=============================================="
+          echo "E2E TESTS FAILED - Keeping traffic on current revision"
+          echo "=============================================="
+
+          echo "FAILED" > /workspace/deployment-status.txt
+          echo "Traffic remains on: $${CURRENT_REVISION}"
+          echo "Failed revision (no traffic): $${NEW_REVISION}"
+        fi
+
+  # Step 7: Send Slack notification
+  - name: 'gcr.io/cloud-builders/curl'
+    id: 'notify-slack'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # Extract Slack config
+        SLACK_BOT_TOKEN=$$(cat /workspace/config.json | grep -oP '"botToken"\s*:\s*"\K[^"]+')
+        SLACK_CHANNEL=$$(cat /workspace/config.json | grep -oP '"notificationChannelId"\s*:\s*"\K[^"]+')
+
+        if [ -z "$$SLACK_BOT_TOKEN" ] || [ -z "$$SLACK_CHANNEL" ]; then
+          echo "Warning: Could not extract Slack config"
+          exit 0
+        fi
+
+        PROJECT_ID=$$(cat /workspace/project-id.txt)
+        TEST_EXIT_CODE=$$(cat /workspace/test-exit-code.txt)
+        TESTS_PASSED=$$(cat /workspace/tests-passed.txt 2>/dev/null || echo "?")
+        TESTS_FAILED=$$(cat /workspace/tests-failed.txt 2>/dev/null || echo "?")
+        DEPLOYMENT_STATUS=$$(cat /workspace/deployment-status.txt)
+        NEW_REVISION=$$(cat /workspace/new-revision.txt)
+
+        if [ "$${DEPLOYMENT_STATUS}" = "SUCCESS" ]; then
+          STATUS_EMOJI=":rocket:"
+          STATUS_TEXT="Deployed Successfully"
+          COLOR="#36a64f"
+          DETAIL_TEXT="E2E tests passed. Traffic switched to new revision."
+        else
+          STATUS_EMOJI=":x:"
+          STATUS_TEXT="Deployment Blocked"
+          COLOR="#dc3545"
+          DETAIL_TEXT="E2E tests failed. Traffic remains on previous revision."
+        fi
+
+        COMMIT_SHORT=$$(echo "${_COMMIT_SHA}" | cut -c1-8)
+        SERVICE_URL=$$(gcloud run services describe ${_SERVICE} \
+          --project=$${PROJECT_ID} \
+          --region=europe-west2 \
+          --format="value(status.url)")
+        BUILD_URL="https://console.cloud.google.com/cloud-build/builds;region=global/$${BUILD_ID}?project=$${PROJECT_ID}"
+
+        cat > /workspace/slack-payload.json << SLACK_EOF
+        {
+          "channel": "$${SLACK_CHANNEL}",
+          "attachments": [
+            {
+              "color": "$${COLOR}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "$${STATUS_EMOJI} ${_SERVICE} - ${_ENVIRONMENT} - $${STATUS_TEXT}",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "$${DETAIL_TEXT}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Commit:*\n<https://github.com/jpartner/breathe-backend/commit/${_COMMIT_SHA}|$${COMMIT_SHORT}>"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Revision:*\n$${NEW_REVISION}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Tests Passed:*\n$${TESTS_PASSED}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Tests Failed:*\n$${TESTS_FAILED}"
+                    }
+                  ]
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "<$${SERVICE_URL}|Service URL> | <$${BUILD_URL}|Build Logs>"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        SLACK_EOF
+
+        RESPONSE=$$(curl -s -X POST https://slack.com/api/chat.postMessage \
+          -H "Authorization: Bearer $${SLACK_BOT_TOKEN}" \
+          -H "Content-type: application/json" \
+          --data @/workspace/slack-payload.json)
+
+        if echo "$$RESPONSE" | grep -q '"ok":true'; then
+          echo "Slack notification sent"
+        else
+          echo "Warning: Slack notification may have failed"
+          echo "Response: $$RESPONSE"
+        fi
+
+  # Step 8: Final status - fail build if tests failed
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'final-status'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        DEPLOYMENT_STATUS=$$(cat /workspace/deployment-status.txt)
+        if [ "$${DEPLOYMENT_STATUS}" != "SUCCESS" ]; then
+          echo "Deployment blocked due to E2E test failures"
+          exit 1
+        fi
+        echo "Deployment completed successfully!"
