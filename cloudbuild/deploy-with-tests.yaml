@@ -102,10 +102,13 @@ steps:
         echo "Deployed new revision: $${NEW_REVISION}"
 
         # Get the tagged URL for testing
-        TAG_URL=$$(gcloud run services describe ${_SERVICE} \
+        # Construct URL from service URL pattern: https://{tag}---{service-host}
+        SERVICE_URL=$$(gcloud run services describe ${_SERVICE} \
           --project=$${PROJECT_ID} \
           --region=europe-west2 \
-          --format="value(status.traffic[?tag=='test-$${SHORT_SHA}'].url)")
+          --format="value(status.url)")
+        SERVICE_HOST=$$(echo "$${SERVICE_URL}" | sed 's|https://||')
+        TAG_URL="https://test-$${SHORT_SHA}---$${SERVICE_HOST}"
 
         echo "$${TAG_URL}" > /workspace/test-url.txt
         echo "Test URL: $${TAG_URL}"
