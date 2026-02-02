@@ -61,13 +61,25 @@ steps:
         ./gradlew :e2e-tests:test --no-daemon 2>&1 | tee /workspace/test-output.txt
         TEST_EXIT_CODE=$$?
 
-        # Parse test results from Gradle output
-        if grep -q "BUILD SUCCESSFUL" /workspace/test-output.txt; then
-          TESTS_PASSED=$$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "0")
-          TESTS_FAILED="0"
+        # Parse test results from JUnit XML reports (more reliable than console output)
+        REPORT_DIR="e2e-tests/build/test-results/test"
+        if [ -d "$$REPORT_DIR" ]; then
+          # Count tests and failures from XML files
+          TOTAL_TESTS=$$(grep -h 'tests=' $$REPORT_DIR/*.xml 2>/dev/null | grep -oP 'tests="\K\d+' | awk '{s+=$$1} END {print s}')
+          TOTAL_FAILURES=$$(grep -h 'failures=' $$REPORT_DIR/*.xml 2>/dev/null | grep -oP 'failures="\K\d+' | awk '{s+=$$1} END {print s}')
+          TOTAL_ERRORS=$$(grep -h 'errors=' $$REPORT_DIR/*.xml 2>/dev/null | grep -oP 'errors="\K\d+' | awk '{s+=$$1} END {print s}')
+
+          TESTS_FAILED=$$((TOTAL_FAILURES + TOTAL_ERRORS))
+          TESTS_PASSED=$$((TOTAL_TESTS - TESTS_FAILED))
         else
-          TESTS_PASSED=$$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "0")
-          TESTS_FAILED=$$(grep -oP '\d+(?= failed)' /workspace/test-output.txt | tail -1 || echo "?")
+          # Fallback to parsing console output
+          if grep -q "BUILD SUCCESSFUL" /workspace/test-output.txt; then
+            TESTS_PASSED="all"
+            TESTS_FAILED="0"
+          else
+            TESTS_PASSED=$$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "?")
+            TESTS_FAILED=$$(grep -oP '\d+(?= failed)' /workspace/test-output.txt | tail -1 || echo "?")
+          fi
         fi
 
         # Write results for notification step
