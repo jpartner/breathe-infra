@@ -64,16 +64,15 @@ echo ""
 echo "Starting deployment..."
 echo ""
 
-# Trigger Cloud Build
-gcloud builds submit \
+# Run the trigger with the specified commit
+gcloud builds triggers run deploy-with-tests \
   --project="breathe-shared" \
-  --config="cloudbuild/deploy-with-tests.yaml" \
-  --substitutions="_ENVIRONMENT=${ENVIRONMENT},_COMMIT_SHA=${COMMIT_SHA}" \
-  --no-source \
-  --async
+  --region="europe-west2" \
+  --sha="${COMMIT_SHA}" \
+  --substitutions="_ENVIRONMENT=${ENVIRONMENT}"
 
 echo ""
-echo "Build submitted. View progress at:"
-echo "https://console.cloud.google.com/cloud-build/builds?project=breathe-shared"
+echo "Build triggered. View progress at:"
+echo "https://console.cloud.google.com/cloud-build/builds?project=breathe-shared&region=europe-west2"
 echo ""
 echo "You'll receive a Slack notification when the deployment completes."

@@ -6,19 +6,19 @@
 # 3. If tests pass: routes traffic to the new revision
 # 4. If tests fail: keeps traffic on the old revision, sends failure notification
 #
-# Usage:
-#   gcloud builds submit --config=cloudbuild/deploy-with-tests.yaml \
-#     --substitutions=_ENVIRONMENT=staging,_COMMIT_SHA=abc123,_SERVICE=breathe-ecommerce \
-#     --no-source
+# Usage (via trigger):
+#   gcloud builds triggers run deploy-with-tests \
+#     --project=breathe-shared --region=europe-west2 \
+#     --sha=<commit> \
+#     --substitutions=_ENVIRONMENT=staging
 #
 # Or use the helper script:
-#   ./scripts/deploy-with-tests.sh staging abc123
+#   ./scripts/deploy-with-tests.sh staging <commit_sha>
 
 timeout: 2400s  # 40 minutes max
 
 substitutions:
   _ENVIRONMENT: ''
-  _COMMIT_SHA: ''
   _SERVICE: 'breathe-ecommerce'
 
 options:
@@ -49,6 +49,7 @@ steps:
         esac
         echo "Environment: ${_ENVIRONMENT}"
         echo "Project: $$(cat /workspace/project-id.txt)"
+        echo "Commit: ${COMMIT_SHA}"
 
   # Step 2: Get current serving revision (for potential rollback info)
   - name: 'gcr.io/cloud-builders/gcloud'
@@ -75,16 +76,18 @@ steps:
       - '-c'
       - |
         PROJECT_ID=$$(cat /workspace/project-id.txt)
-        CONFIG_BUCKET=$$(cat /workspace/config-bucket.txt)
 
-        echo "Deploying ${_SERVICE} with commit ${_COMMIT_SHA} (no traffic)..."
+        # Use short SHA for tag
+        SHORT_SHA=$$(echo "${COMMIT_SHA}" | cut -c1-8)
+
+        echo "Deploying ${_SERVICE} with commit ${COMMIT_SHA} (no traffic)..."
 
         gcloud run deploy ${_SERVICE} \
           --project=$${PROJECT_ID} \
           --region=europe-west2 \
-          --image=europe-west2-docker.pkg.dev/breathe-shared/breathe-ecommerce/breathe-ecommerce:${_COMMIT_SHA} \
+          --image=europe-west2-docker.pkg.dev/breathe-shared/breathe-ecommerce/breathe-ecommerce:${COMMIT_SHA} \
           --no-traffic \
-          --tag=test-${_COMMIT_SHA:0:8}
+          --tag=test-$${SHORT_SHA}
 
         # Get the new revision name
         NEW_REVISION=$$(gcloud run revisions list \
@@ -102,7 +105,7 @@ steps:
         TAG_URL=$$(gcloud run services describe ${_SERVICE} \
           --project=$${PROJECT_ID} \
           --region=europe-west2 \
-          --format="value(status.traffic[?tag=='test-${_COMMIT_SHA:0:8}'].url)")
+          --format="value(status.traffic[?tag=='test-$${SHORT_SHA}'].url)")
 
         echo "$${TAG_URL}" > /workspace/test-url.txt
         echo "Test URL: $${TAG_URL}"
@@ -119,21 +122,9 @@ steps:
         gsutil cp gs://$${CONFIG_BUCKET}/config.json /workspace/config.json
         echo "Config loaded successfully"
 
-  # Step 5: Clone backend repo and run E2E tests against new revision
-  - name: 'gcr.io/cloud-builders/git'
-    id: 'clone-repo'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        git clone https://github.com/jpartner/breathe-backend.git /workspace/backend
-        cd /workspace/backend
-        git checkout ${_COMMIT_SHA}
-        echo "Checked out commit: $$(git rev-parse HEAD)"
-
+  # Step 5: Run E2E tests against new revision (source provided by trigger)
   - name: 'gradle:8.6-jdk21'
     id: 'run-tests'
-    dir: '/workspace/backend'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -146,7 +137,7 @@ steps:
         echo "Running E2E tests against NEW revision"
         echo "Environment: ${_ENVIRONMENT}"
         echo "Test URL: $${TEST_URL}"
-        echo "Commit: ${_COMMIT_SHA}"
+        echo "Commit: ${COMMIT_SHA}"
         echo "=============================================="
 
         export E2E_BASE_URL="$${TEST_URL}"
@@ -155,13 +146,23 @@ steps:
         ./gradlew :e2e-tests:test --no-daemon 2>&1 | tee /workspace/test-output.txt
         TEST_EXIT_CODE=$$?
 
-        # Parse test results
-        if grep -q "BUILD SUCCESSFUL" /workspace/test-output.txt; then
-          TESTS_PASSED=$$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "0")
-          TESTS_FAILED="0"
+        # Parse test results from JUnit XML reports
+        REPORT_DIR="e2e-tests/build/test-results/test"
+        if [ -d "$$REPORT_DIR" ]; then
+          TOTAL_TESTS=$$(grep -h 'tests=' $$REPORT_DIR/*.xml 2>/dev/null | grep -oP 'tests="\K\d+' | awk '{s+=$$1} END {print s}')
+          TOTAL_FAILURES=$$(grep -h 'failures=' $$REPORT_DIR/*.xml 2>/dev/null | grep -oP 'failures="\K\d+' | awk '{s+=$$1} END {print s}')
+          TOTAL_ERRORS=$$(grep -h 'errors=' $$REPORT_DIR/*.xml 2>/dev/null | grep -oP 'errors="\K\d+' | awk '{s+=$$1} END {print s}')
+
+          TESTS_FAILED=$$((TOTAL_FAILURES + TOTAL_ERRORS))
+          TESTS_PASSED=$$((TOTAL_TESTS - TESTS_FAILED))
         else
-          TESTS_PASSED=$$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "0")
-          TESTS_FAILED=$$(grep -oP '\d+(?= failed)' /workspace/test-output.txt | tail -1 || echo "?")
+          if grep -q "BUILD SUCCESSFUL" /workspace/test-output.txt; then
+            TESTS_PASSED="all"
+            TESTS_FAILED="0"
+          else
+            TESTS_PASSED=$$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "?")
+            TESTS_FAILED=$$(grep -oP '\d+(?= failed)' /workspace/test-output.txt | tail -1 || echo "?")
+          fi
         fi
 
         echo "$${TEST_EXIT_CODE}" > /workspace/test-exit-code.txt
@@ -242,12 +243,12 @@ steps:
           DETAIL_TEXT="E2E tests failed. Traffic remains on previous revision."
         fi
 
-        COMMIT_SHORT=$$(echo "${_COMMIT_SHA}" | cut -c1-8)
+        COMMIT_SHORT=$$(echo "${COMMIT_SHA}" | cut -c1-8)
         SERVICE_URL=$$(gcloud run services describe ${_SERVICE} \
           --project=$${PROJECT_ID} \
           --region=europe-west2 \
           --format="value(status.url)")
-        BUILD_URL="https://console.cloud.google.com/cloud-build/builds;region=global/$${BUILD_ID}?project=$${PROJECT_ID}"
+        BUILD_URL="https://console.cloud.google.com/cloud-build/builds;region=europe-west2/$${BUILD_ID}?project=breathe-shared"
 
         cat > /workspace/slack-payload.json << SLACK_EOF
         {
@@ -276,7 +277,7 @@ steps:
                   "fields": [
                     {
                       "type": "mrkdwn",
-                      "text": "*Commit:*\n<https://github.com/jpartner/breathe-backend/commit/${_COMMIT_SHA}|$${COMMIT_SHORT}>"
+                      "text": "*Commit:*\n<https://github.com/jpartner/breathe-java/commit/${COMMIT_SHA}|$${COMMIT_SHORT}>"
                     },
                     {
                       "type": "mrkdwn",
