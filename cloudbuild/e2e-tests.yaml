@@ -50,6 +50,7 @@ steps:
       - '-c'
       - |
         set +e  # Don't exit on test failure
+        set -o pipefail  # Capture exit code from gradlew, not tee
 
         echo "=============================================="
         echo "Running E2E tests against ${_ENVIRONMENT}"
