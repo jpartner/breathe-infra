@@ -66,7 +66,7 @@ steps:
 
         echo "=============================================="
         echo "Running E2E tests against ${_ENVIRONMENT}"
-        echo "Target URL: ${E2E_BASE_URL}"
+        echo "Target URL: $${E2E_BASE_URL}"
         echo "Commit: ${_COMMIT_SHA}"
         echo "=============================================="
 
@@ -84,12 +84,12 @@ steps:
         fi
 
         # Write results for notification step
-        echo "${TEST_EXIT_CODE}" > /workspace/test-exit-code.txt
-        echo "${TESTS_PASSED}" > /workspace/tests-passed.txt
-        echo "${TESTS_FAILED}" > /workspace/tests-failed.txt
+        echo "$${TEST_EXIT_CODE}" > /workspace/test-exit-code.txt
+        echo "$${TESTS_PASSED}" > /workspace/tests-passed.txt
+        echo "$${TESTS_FAILED}" > /workspace/tests-failed.txt
 
         echo ""
-        echo "Test results: ${TESTS_PASSED} passed, ${TESTS_FAILED} failed"
+        echo "Test results: $${TESTS_PASSED} passed, $${TESTS_FAILED} failed"
 
         exit 0  # Always succeed so we can send notification
 
@@ -101,21 +101,21 @@ steps:
       - '-c'
       - |
         # Extract Slack config from config.json
-        SLACK_BOT_TOKEN=$(cat /workspace/config.json | grep -oP '"botToken"\s*:\s*"\K[^"]+')
-        SLACK_CHANNEL=$(cat /workspace/config.json | grep -oP '"notificationChannelId"\s*:\s*"\K[^"]+')
+        SLACK_BOT_TOKEN=$$(cat /workspace/config.json | grep -oP '"botToken"\s*:\s*"\K[^"]+')
+        SLACK_CHANNEL=$$(cat /workspace/config.json | grep -oP '"notificationChannelId"\s*:\s*"\K[^"]+')
 
-        if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
+        if [ -z "$$SLACK_BOT_TOKEN" ] || [ -z "$$SLACK_CHANNEL" ]; then
           echo "Warning: Could not extract Slack config from config.json"
           echo "Skipping Slack notification"
           exit 0
         fi
 
-        TEST_EXIT_CODE=$(cat /workspace/test-exit-code.txt)
-        TESTS_PASSED=$(cat /workspace/tests-passed.txt 2>/dev/null || echo "?")
-        TESTS_FAILED=$(cat /workspace/tests-failed.txt 2>/dev/null || echo "?")
+        TEST_EXIT_CODE=$$(cat /workspace/test-exit-code.txt)
+        TESTS_PASSED=$$(cat /workspace/tests-passed.txt 2>/dev/null || echo "?")
+        TESTS_FAILED=$$(cat /workspace/tests-failed.txt 2>/dev/null || echo "?")
 
         # Determine status
-        if [ "${TEST_EXIT_CODE}" = "0" ]; then
+        if [ "$${TEST_EXIT_CODE}" = "0" ]; then
           STATUS_EMOJI=":white_check_mark:"
           STATUS_TEXT="Passed"
           COLOR="#36a64f"
@@ -126,21 +126,21 @@ steps:
         fi
 
         # Build Slack message
-        COMMIT_SHORT=$(echo "${_COMMIT_SHA}" | cut -c1-8)
-        BUILD_URL="https://console.cloud.google.com/cloud-build/builds;region=global/${BUILD_ID}?project=${PROJECT_ID}"
+        COMMIT_SHORT=$$(echo "${_COMMIT_SHA}" | cut -c1-8)
+        BUILD_URL="https://console.cloud.google.com/cloud-build/builds;region=global/$${BUILD_ID}?project=$${PROJECT_ID}"
 
         cat > /workspace/slack-payload.json << SLACK_EOF
         {
-          "channel": "${SLACK_CHANNEL}",
+          "channel": "$${SLACK_CHANNEL}",
           "attachments": [
             {
-              "color": "${COLOR}",
+              "color": "$${COLOR}",
               "blocks": [
                 {
                   "type": "header",
                   "text": {
                     "type": "plain_text",
-                    "text": "${STATUS_EMOJI} E2E Tests ${STATUS_TEXT} - ${_ENVIRONMENT}",
+                    "text": "$${STATUS_EMOJI} E2E Tests $${STATUS_TEXT} - ${_ENVIRONMENT}",
                     "emoji": true
                   }
                 },
@@ -153,15 +153,15 @@ steps:
                     },
                     {
                       "type": "mrkdwn",
-                      "text": "*Commit:*\n<https://github.com/jpartner/breathe-backend/commit/${_COMMIT_SHA}|${COMMIT_SHORT}>"
+                      "text": "*Commit:*\n<https://github.com/jpartner/breathe-backend/commit/${_COMMIT_SHA}|$${COMMIT_SHORT}>"
                     },
                     {
                       "type": "mrkdwn",
-                      "text": "*Tests Passed:*\n${TESTS_PASSED}"
+                      "text": "*Tests Passed:*\n$${TESTS_PASSED}"
                     },
                     {
                       "type": "mrkdwn",
-                      "text": "*Tests Failed:*\n${TESTS_FAILED}"
+                      "text": "*Tests Failed:*\n$${TESTS_FAILED}"
                     }
                   ]
                 },
@@ -170,7 +170,7 @@ steps:
                   "elements": [
                     {
                       "type": "mrkdwn",
-                      "text": "<${_ECOMMERCE_URL}|Service URL> | <${BUILD_URL}|Build Logs>"
+                      "text": "<${_ECOMMERCE_URL}|Service URL> | <$${BUILD_URL}|Build Logs>"
                     }
                   ]
                 }
@@ -181,17 +181,17 @@ steps:
         SLACK_EOF
 
         # Send to Slack using chat.postMessage API
-        RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
-          -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+        RESPONSE=$$(curl -s -X POST https://slack.com/api/chat.postMessage \
+          -H "Authorization: Bearer $${SLACK_BOT_TOKEN}" \
           -H "Content-type: application/json" \
           --data @/workspace/slack-payload.json)
 
         # Check response
-        if echo "$RESPONSE" | grep -q '"ok":true'; then
-          echo "Slack notification sent successfully to channel ${SLACK_CHANNEL}"
+        if echo "$$RESPONSE" | grep -q '"ok":true'; then
+          echo "Slack notification sent successfully to channel $${SLACK_CHANNEL}"
         else
           echo "Warning: Slack notification may have failed"
-          echo "Response: $RESPONSE"
+          echo "Response: $$RESPONSE"
         fi
 
   # Step 5: Fail the build if tests failed (after notification)
@@ -201,9 +201,9 @@ steps:
     args:
       - '-c'
       - |
-        TEST_EXIT_CODE=$(cat /workspace/test-exit-code.txt)
-        if [ "${TEST_EXIT_CODE}" != "0" ]; then
-          echo "E2E tests failed with exit code ${TEST_EXIT_CODE}"
+        TEST_EXIT_CODE=$$(cat /workspace/test-exit-code.txt)
+        if [ "$${TEST_EXIT_CODE}" != "0" ]; then
+          echo "E2E tests failed with exit code $${TEST_EXIT_CODE}"
           exit 1
         fi
         echo "E2E tests passed!"
