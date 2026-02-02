@@ -463,6 +463,40 @@ resource "google_cloudbuild_trigger" "feed_puller" {
   depends_on = [module.project, google_service_account.cloudbuild]
 }
 
+# Admin UI -> dev
+resource "google_cloudbuild_trigger" "admin_dev" {
+  project     = module.project.project_id
+  name        = "breathe-admin-dev"
+  description = "Build and deploy admin UI to dev on push to v2"
+  location    = var.region
+
+  github {
+    owner = var.github_owner
+    name  = "breathe-admin-nuxt-claude"
+
+    push {
+      branch = "^v2$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+
+  substitutions = {
+    _DEPLOY_PROJECT   = "breathe-dev-env"
+    _ENV_NAME         = "dev"
+    _DEPLOY_REGION    = var.region
+    _AR_HOSTNAME      = "${var.region}-docker.pkg.dev"
+    _SHARED_PROJECT   = module.project.project_id
+    _SERVICE_NAME     = "breathe-admin"
+    _BACKEND_URL      = "https://breathe-ecommerce-815682864674.europe-west2.run.app"
+    _TYPESENSE_API_KEY = ""
+  }
+
+  service_account = google_service_account.cloudbuild.id
+
+  depends_on = [module.project, google_service_account.cloudbuild]
+}
+
 # =============================================================================
 # Feed Puller Cloud Run Job (in breathe-shared)
 # Pulls supplier feeds once, stores in shared bucket for all environments

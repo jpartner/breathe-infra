@@ -111,3 +111,15 @@ variable "feed_processor_image_tag" {
   type        = string
   default     = "latest"
 }
+
+variable "admin_image_tag" {
+  description = "Tag for the admin UI Docker image"
+  type        = string
+  default     = "latest"
+}
+
+variable "typesense_api_key" {
+  description = "Typesense search API key"
+  type        = string
+  default     = ""
+}

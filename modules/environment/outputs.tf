@@ -40,3 +40,8 @@ output "feed_processor_job_name" {
   description = "Name of the feed processor Cloud Run job"
   value       = google_cloud_run_v2_job.feed_processor.name
 }
+
+output "admin_service_url" {
+  description = "URL of the admin Cloud Run service"
+  value       = google_cloud_run_v2_service.admin.uri
+}

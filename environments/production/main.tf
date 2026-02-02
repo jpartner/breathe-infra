@@ -86,6 +86,10 @@ module "environment" {
   # Container image tags
   ecommerce_image_tag      = var.ecommerce_image_tag
   feed_processor_image_tag = var.feed_processor_image_tag
+  admin_image_tag          = var.admin_image_tag
+
+  # Admin UI config
+  typesense_api_key = var.typesense_api_key
 
   depends_on = [module.project]
 }

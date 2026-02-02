@@ -546,3 +546,85 @@ resource "google_cloud_run_v2_job_iam_member" "feed_processor_invoker" {
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
 }
+
+# =============================================================================
+# Cloud Run Service - Admin UI
+# =============================================================================
+
+resource "google_cloud_run_v2_service" "admin" {
+  name     = "breathe-admin"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  # Ignore image changes - deployments are managed via CI, not Terraform
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
+  template {
+    service_account = google_service_account.admin.email
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/breathe-admin/breathe-admin:${var.admin_image_tag}"
+
+      ports {
+        container_port = 3000
+      }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      env {
+        name  = "NUXT_PUBLIC_ADMIN_API_URL"
+        value = var.ecommerce_url
+      }
+
+      env {
+        name  = "NUXT_PUBLIC_TYPESENSE_API_KEY"
+        value = var.typesense_api_key
+      }
+
+      startup_probe {
+        tcp_socket {
+          port = 3000
+        }
+        initial_delay_seconds = 5
+        timeout_seconds       = 5
+        period_seconds        = 10
+        failure_threshold     = 12
+      }
+    }
+
+    timeout = "60s"
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+}
+
+# Allow unauthenticated access to admin UI (Auth0 handles authentication)
+resource "google_cloud_run_v2_service_iam_member" "admin_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.admin.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}

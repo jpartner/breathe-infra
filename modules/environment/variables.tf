@@ -117,3 +117,15 @@ variable "slack_notification_channel_id" {
   type        = string
   default     = "C03HS8FEU4Q"  # deployments channel
 }
+
+variable "admin_image_tag" {
+  description = "Tag for the admin UI Docker image"
+  type        = string
+  default     = "latest"
+}
+
+variable "typesense_api_key" {
+  description = "Typesense search API key"
+  type        = string
+  default     = ""
+}
