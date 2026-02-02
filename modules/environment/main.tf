@@ -6,6 +6,12 @@ locals {
   db_name    = var.db_name != "" ? var.db_name : "breathe_${var.environment}"
 }
 
+# Read Slack bot token from Secret Manager
+data "google_secret_manager_secret_version" "slack_bot_token" {
+  project = var.shared_project_id
+  secret  = var.slack_bot_token_secret_id
+}
+
 # Service Accounts with minimal permissions
 resource "google_service_account" "ecommerce" {
   project      = var.project_id
@@ -299,6 +305,11 @@ resource "google_storage_bucket_object" "config" {
 
     features = {
       enableImageCache = var.enable_image_cache
+    }
+
+    slack = {
+      botToken              = data.google_secret_manager_secret_version.slack_bot_token.secret_data
+      notificationChannelId = var.slack_notification_channel_id
     }
 
     secrets = {

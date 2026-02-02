@@ -4,11 +4,14 @@
 #   _ENVIRONMENT: Target environment (dev, staging)
 #   _COMMIT_SHA: Git commit hash of the deployed version to test
 #   _ECOMMERCE_URL: URL of the ecommerce service to test against
-#   _SLACK_CHANNEL: Slack channel ID for notifications (default: C07TGMGH3AA for staging)
+#   _CONFIG_BUCKET: Config bucket name (e.g., breathe-staging-config)
+#
+# Slack config (bot token and channel ID) is read from the environment's
+# config.json in GCS, matching the ecommerce service configuration.
 #
 # Usage:
 #   gcloud builds submit --config=cloudbuild/e2e-tests.yaml \
-#     --substitutions=_ENVIRONMENT=staging,_COMMIT_SHA=abc123,_ECOMMERCE_URL=https://breathe-ecommerce-xxx.run.app \
+#     --substitutions=_ENVIRONMENT=staging,_COMMIT_SHA=abc123,_ECOMMERCE_URL=https://...,_CONFIG_BUCKET=breathe-staging-config \
 #     --no-source
 
 timeout: 1800s  # 30 minutes max
@@ -17,8 +20,7 @@ substitutions:
   _ENVIRONMENT: 'dev'
   _COMMIT_SHA: ''
   _ECOMMERCE_URL: ''
-  # Default to staging channel, prod notifications use C09403US7FH
-  _SLACK_CHANNEL: 'C07TGMGH3AA'
+  _CONFIG_BUCKET: ''
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -38,7 +40,18 @@ steps:
         echo "Checked out commit: $(git rev-parse HEAD)"
         echo "Commit message: $(git log -1 --pretty=%B)"
 
-  # Step 2: Run the E2E tests
+  # Step 2: Fetch config from GCS
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'fetch-config'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Fetching config from gs://${_CONFIG_BUCKET}/config.json"
+        gsutil cp gs://${_CONFIG_BUCKET}/config.json /workspace/config.json
+        echo "Config loaded successfully"
+
+  # Step 3: Run the E2E tests
   - name: 'gradle:8.6-jdk21'
     id: 'run-tests'
     dir: '/workspace/backend'
@@ -80,15 +93,23 @@ steps:
 
         exit 0  # Always succeed so we can send notification
 
-  # Step 3: Send Slack notification using existing bot token
+  # Step 4: Send Slack notification using config from GCS
   - name: 'gcr.io/cloud-builders/curl'
     id: 'notify-slack'
     entrypoint: 'bash'
-    secretEnv:
-      - 'SLACK_BOT_TOKEN'
     args:
       - '-c'
       - |
+        # Extract Slack config from config.json
+        SLACK_BOT_TOKEN=$(cat /workspace/config.json | grep -oP '"botToken"\s*:\s*"\K[^"]+')
+        SLACK_CHANNEL=$(cat /workspace/config.json | grep -oP '"notificationChannelId"\s*:\s*"\K[^"]+')
+
+        if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
+          echo "Warning: Could not extract Slack config from config.json"
+          echo "Skipping Slack notification"
+          exit 0
+        fi
+
         TEST_EXIT_CODE=$(cat /workspace/test-exit-code.txt)
         TESTS_PASSED=$(cat /workspace/tests-passed.txt 2>/dev/null || echo "?")
         TESTS_FAILED=$(cat /workspace/tests-failed.txt 2>/dev/null || echo "?")
@@ -108,10 +129,9 @@ steps:
         COMMIT_SHORT=$(echo "${_COMMIT_SHA}" | cut -c1-8)
         BUILD_URL="https://console.cloud.google.com/cloud-build/builds;region=global/${BUILD_ID}?project=${PROJECT_ID}"
 
-        # Use Slack chat.postMessage API with bot token
         cat > /workspace/slack-payload.json << SLACK_EOF
         {
-          "channel": "${_SLACK_CHANNEL}",
+          "channel": "${SLACK_CHANNEL}",
           "attachments": [
             {
               "color": "${COLOR}",
@@ -168,13 +188,13 @@ steps:
 
         # Check response
         if echo "$RESPONSE" | grep -q '"ok":true'; then
-          echo "Slack notification sent successfully"
+          echo "Slack notification sent successfully to channel ${SLACK_CHANNEL}"
         else
           echo "Warning: Slack notification may have failed"
           echo "Response: $RESPONSE"
         fi
 
-  # Step 4: Fail the build if tests failed (after notification)
+  # Step 5: Fail the build if tests failed (after notification)
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'check-results'
     entrypoint: 'bash'
@@ -187,8 +207,3 @@ steps:
           exit 1
         fi
         echo "E2E tests passed!"
-
-availableSecrets:
-  secretManager:
-    - versionName: projects/breathe-shared/secrets/slack-bot-token/versions/latest
-      env: 'SLACK_BOT_TOKEN'

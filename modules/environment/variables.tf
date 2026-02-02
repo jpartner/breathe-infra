@@ -104,3 +104,16 @@ variable "feed_processor_image_tag" {
   type        = string
   default     = "latest"
 }
+
+# Slack notification configuration
+variable "slack_bot_token_secret_id" {
+  description = "Secret Manager secret ID for Slack bot token"
+  type        = string
+  default     = "slack-bot-token"
+}
+
+variable "slack_notification_channel_id" {
+  description = "Slack channel ID for deployment notifications"
+  type        = string
+  default     = "C03HS8FEU4Q"  # deployments channel
+}

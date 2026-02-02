@@ -10,6 +10,9 @@
 #
 # If commit_sha is not provided, it will be extracted from the currently
 # deployed Cloud Run service.
+#
+# Slack notifications are sent using the bot token and channel ID from
+# the environment's config.json (same as the ecommerce service uses).
 
 set -e
 
@@ -29,13 +32,15 @@ if [ "$ENVIRONMENT" != "dev" ] && [ "$ENVIRONMENT" != "staging" ]; then
   exit 1
 fi
 
-# Set project ID based on environment
+# Set project ID and config bucket based on environment
 case "$ENVIRONMENT" in
   dev)
     PROJECT_ID="breathe-dev-env"
+    CONFIG_BUCKET="breathe-dev-config"
     ;;
   staging)
     PROJECT_ID="breathe-staging-env"
+    CONFIG_BUCKET="breathe-staging-config"
     ;;
 esac
 
@@ -74,6 +79,7 @@ if [ -z "$COMMIT_SHA" ]; then
 fi
 
 echo "Commit SHA: ${COMMIT_SHA}"
+echo "Config bucket: ${CONFIG_BUCKET}"
 echo ""
 echo "Starting E2E tests..."
 echo "========================================"
@@ -82,7 +88,7 @@ echo "========================================"
 gcloud builds submit \
   --project="breathe-shared" \
   --config="cloudbuild/e2e-tests.yaml" \
-  --substitutions="_ENVIRONMENT=${ENVIRONMENT},_COMMIT_SHA=${COMMIT_SHA},_ECOMMERCE_URL=${ECOMMERCE_URL}" \
+  --substitutions="_ENVIRONMENT=${ENVIRONMENT},_COMMIT_SHA=${COMMIT_SHA},_ECOMMERCE_URL=${ECOMMERCE_URL},_CONFIG_BUCKET=${CONFIG_BUCKET}" \
   --no-source \
   --async
 
