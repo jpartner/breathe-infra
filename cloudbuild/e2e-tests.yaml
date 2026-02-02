@@ -1,0 +1,194 @@
+# Cloud Build configuration for running E2E tests against deployed environments
+#
+# Substitution variables:
+#   _ENVIRONMENT: Target environment (dev, staging)
+#   _COMMIT_SHA: Git commit hash of the deployed version to test
+#   _ECOMMERCE_URL: URL of the ecommerce service to test against
+#   _SLACK_CHANNEL: Slack channel ID for notifications (default: C07TGMGH3AA for staging)
+#
+# Usage:
+#   gcloud builds submit --config=cloudbuild/e2e-tests.yaml \
+#     --substitutions=_ENVIRONMENT=staging,_COMMIT_SHA=abc123,_ECOMMERCE_URL=https://breathe-ecommerce-xxx.run.app \
+#     --no-source
+
+timeout: 1800s  # 30 minutes max
+
+substitutions:
+  _ENVIRONMENT: 'dev'
+  _COMMIT_SHA: ''
+  _ECOMMERCE_URL: ''
+  # Default to staging channel, prod notifications use C09403US7FH
+  _SLACK_CHANNEL: 'C07TGMGH3AA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  # Step 1: Clone the backend repo at the specific commit
+  - name: 'gcr.io/cloud-builders/git'
+    id: 'clone-repo'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        git clone https://github.com/jpartner/breathe-backend.git /workspace/backend
+        cd /workspace/backend
+        git checkout ${_COMMIT_SHA}
+        echo "Checked out commit: $(git rev-parse HEAD)"
+        echo "Commit message: $(git log -1 --pretty=%B)"
+
+  # Step 2: Run the E2E tests
+  - name: 'gradle:8.6-jdk21'
+    id: 'run-tests'
+    dir: '/workspace/backend'
+    entrypoint: 'bash'
+    env:
+      - 'E2E_BASE_URL=${_ECOMMERCE_URL}'
+      - 'GRADLE_USER_HOME=/workspace/.gradle'
+    args:
+      - '-c'
+      - |
+        set +e  # Don't exit on test failure
+
+        echo "=============================================="
+        echo "Running E2E tests against ${_ENVIRONMENT}"
+        echo "Target URL: ${E2E_BASE_URL}"
+        echo "Commit: ${_COMMIT_SHA}"
+        echo "=============================================="
+
+        # Run tests and capture exit code
+        ./gradlew :e2e-tests:test --no-daemon 2>&1 | tee /workspace/test-output.txt
+        TEST_EXIT_CODE=$?
+
+        # Parse test results from Gradle output
+        if grep -q "BUILD SUCCESSFUL" /workspace/test-output.txt; then
+          TESTS_PASSED=$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "0")
+          TESTS_FAILED="0"
+        else
+          TESTS_PASSED=$(grep -oP '\d+(?= tests completed)' /workspace/test-output.txt | tail -1 || echo "0")
+          TESTS_FAILED=$(grep -oP '\d+(?= failed)' /workspace/test-output.txt | tail -1 || echo "?")
+        fi
+
+        # Write results for notification step
+        echo "${TEST_EXIT_CODE}" > /workspace/test-exit-code.txt
+        echo "${TESTS_PASSED}" > /workspace/tests-passed.txt
+        echo "${TESTS_FAILED}" > /workspace/tests-failed.txt
+
+        echo ""
+        echo "Test results: ${TESTS_PASSED} passed, ${TESTS_FAILED} failed"
+
+        exit 0  # Always succeed so we can send notification
+
+  # Step 3: Send Slack notification using existing bot token
+  - name: 'gcr.io/cloud-builders/curl'
+    id: 'notify-slack'
+    entrypoint: 'bash'
+    secretEnv:
+      - 'SLACK_BOT_TOKEN'
+    args:
+      - '-c'
+      - |
+        TEST_EXIT_CODE=$(cat /workspace/test-exit-code.txt)
+        TESTS_PASSED=$(cat /workspace/tests-passed.txt 2>/dev/null || echo "?")
+        TESTS_FAILED=$(cat /workspace/tests-failed.txt 2>/dev/null || echo "?")
+
+        # Determine status
+        if [ "${TEST_EXIT_CODE}" = "0" ]; then
+          STATUS_EMOJI=":white_check_mark:"
+          STATUS_TEXT="Passed"
+          COLOR="#36a64f"
+        else
+          STATUS_EMOJI=":x:"
+          STATUS_TEXT="Failed"
+          COLOR="#dc3545"
+        fi
+
+        # Build Slack message
+        COMMIT_SHORT=$(echo "${_COMMIT_SHA}" | cut -c1-8)
+        BUILD_URL="https://console.cloud.google.com/cloud-build/builds;region=global/${BUILD_ID}?project=${PROJECT_ID}"
+
+        # Use Slack chat.postMessage API with bot token
+        cat > /workspace/slack-payload.json << SLACK_EOF
+        {
+          "channel": "${_SLACK_CHANNEL}",
+          "attachments": [
+            {
+              "color": "${COLOR}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${STATUS_EMOJI} E2E Tests ${STATUS_TEXT} - ${_ENVIRONMENT}",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\n${_ENVIRONMENT}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Commit:*\n<https://github.com/jpartner/breathe-backend/commit/${_COMMIT_SHA}|${COMMIT_SHORT}>"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Tests Passed:*\n${TESTS_PASSED}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Tests Failed:*\n${TESTS_FAILED}"
+                    }
+                  ]
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "<${_ECOMMERCE_URL}|Service URL> | <${BUILD_URL}|Build Logs>"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        SLACK_EOF
+
+        # Send to Slack using chat.postMessage API
+        RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
+          -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+          -H "Content-type: application/json" \
+          --data @/workspace/slack-payload.json)
+
+        # Check response
+        if echo "$RESPONSE" | grep -q '"ok":true'; then
+          echo "Slack notification sent successfully"
+        else
+          echo "Warning: Slack notification may have failed"
+          echo "Response: $RESPONSE"
+        fi
+
+  # Step 4: Fail the build if tests failed (after notification)
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'check-results'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        TEST_EXIT_CODE=$(cat /workspace/test-exit-code.txt)
+        if [ "${TEST_EXIT_CODE}" != "0" ]; then
+          echo "E2E tests failed with exit code ${TEST_EXIT_CODE}"
+          exit 1
+        fi
+        echo "E2E tests passed!"
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/breathe-shared/secrets/slack-bot-token/versions/latest
+      env: 'SLACK_BOT_TOKEN'
