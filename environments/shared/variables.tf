@@ -91,3 +91,25 @@ variable "db_schemas" {
   type        = list(string)
   default     = ["app"]
 }
+
+# =============================================================================
+# Environment URLs for GCP Admin Dashboard
+# =============================================================================
+
+variable "environment_urls" {
+  description = "URLs and configuration for each environment"
+  type = map(object({
+    customer_frontend_url = string
+  }))
+  default = {
+    dev = {
+      customer_frontend_url = "https://dev.breathebranding.co.uk"
+    }
+    staging = {
+      customer_frontend_url = "https://staging.breathebranding.co.uk"
+    }
+    production = {
+      customer_frontend_url = "https://breathebranding.co.uk"
+    }
+  }
+}

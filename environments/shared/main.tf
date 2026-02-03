@@ -96,6 +96,7 @@ module "artifact_registry" {
     "breathe-admin",
     "breathe-pricing-rust",
     "breathe-feed-puller",
+    "breathe-gcp-admin",
   ]
 
   reader_projects = var.environment_project_numbers
@@ -285,6 +286,7 @@ resource "google_artifact_registry_repository_iam_member" "cloudbuild_writer" {
     "breathe-admin",
     "breathe-pricing-rust",
     "breathe-feed-puller",
+    "breathe-gcp-admin",
   ])
 
   project    = module.project.project_id
@@ -591,4 +593,226 @@ module "database_schemas" {
   app_user     = module.cloud_sql.app_user_name
 
   depends_on = [module.cloud_sql]
+}
+
+# =============================================================================
+# GCP Admin - Deployment Management UI
+# Allows viewing Cloud Run services and promoting deployments between envs
+# =============================================================================
+
+# Service account for the GCP Admin application
+resource "google_service_account" "gcp_admin" {
+  project      = module.project.project_id
+  account_id   = "sa-gcp-admin"
+  display_name = "GCP Admin Service"
+  description  = "Service account for Breathe GCP Admin application"
+
+  depends_on = [module.project]
+}
+
+# Grant GCP Admin SA Cloud Run viewer on all environment projects
+resource "google_project_iam_member" "gcp_admin_run_viewer" {
+  for_each = toset(["breathe-dev-env", "breathe-staging-env", "breathe-production-env"])
+
+  project = each.value
+  role    = "roles/run.viewer"
+  member  = "serviceAccount:${google_service_account.gcp_admin.email}"
+}
+
+# Grant GCP Admin SA Cloud Run admin on staging/production (for promotions)
+resource "google_project_iam_member" "gcp_admin_run_admin" {
+  for_each = toset(["breathe-staging-env", "breathe-production-env"])
+
+  project = each.value
+  role    = "roles/run.admin"
+  member  = "serviceAccount:${google_service_account.gcp_admin.email}"
+}
+
+# Grant GCP Admin SA service account user on staging/production (to deploy with other SAs)
+resource "google_project_iam_member" "gcp_admin_sa_user" {
+  for_each = toset(["breathe-staging-env", "breathe-production-env"])
+
+  project = each.value
+  role    = "roles/iam.serviceAccountUser"
+  member  = "serviceAccount:${google_service_account.gcp_admin.email}"
+}
+
+# Environment configuration file for GCP Admin dashboard
+# Contains links to all resources across environments
+locals {
+  gcp_admin_config = {
+    environments = {
+      dev = {
+        project_id            = "breathe-dev-env"
+        customer_frontend_url = var.environment_urls.dev.customer_frontend_url
+        console_links = {
+          cloud_run       = "https://console.cloud.google.com/run?project=breathe-dev-env"
+          feed_processor  = "https://console.cloud.google.com/run/jobs/details/europe-west2/pffeedprocessor?project=breathe-dev-env"
+          cloud_build     = "https://console.cloud.google.com/cloud-build/builds;region=europe-west2?project=breathe-shared"
+        }
+        buckets = {
+          generated_data = {
+            name = "breathe-dev-generated-product-data"
+            url  = "https://console.cloud.google.com/storage/browser/breathe-dev-generated-product-data"
+          }
+          images = {
+            name = "breathe-dev-product-images"
+            url  = "https://console.cloud.google.com/storage/browser/breathe-dev-product-images"
+          }
+        }
+      }
+      staging = {
+        project_id            = "breathe-staging-env"
+        customer_frontend_url = var.environment_urls.staging.customer_frontend_url
+        console_links = {
+          cloud_run       = "https://console.cloud.google.com/run?project=breathe-staging-env"
+          feed_processor  = "https://console.cloud.google.com/run/jobs/details/europe-west2/pffeedprocessor?project=breathe-staging-env"
+          cloud_build     = "https://console.cloud.google.com/cloud-build/builds;region=europe-west2?project=breathe-shared"
+        }
+        buckets = {
+          generated_data = {
+            name = "breathe-staging-generated-product-data"
+            url  = "https://console.cloud.google.com/storage/browser/breathe-staging-generated-product-data"
+          }
+          images = {
+            name = "breathe-staging-product-images"
+            url  = "https://console.cloud.google.com/storage/browser/breathe-staging-product-images"
+          }
+        }
+      }
+      production = {
+        project_id            = "breathe-production-env"
+        customer_frontend_url = var.environment_urls.production.customer_frontend_url
+        console_links = {
+          cloud_run       = "https://console.cloud.google.com/run?project=breathe-production-env"
+          feed_processor  = "https://console.cloud.google.com/run/jobs/details/europe-west2/pffeedprocessor?project=breathe-production-env"
+          cloud_build     = "https://console.cloud.google.com/cloud-build/builds;region=europe-west2?project=breathe-shared"
+        }
+        buckets = {
+          generated_data = {
+            name = "breathe-prod-generated-product-data"
+            url  = "https://console.cloud.google.com/storage/browser/breathe-prod-generated-product-data"
+          }
+          images = {
+            name = "breathe-prod-product-images"
+            url  = "https://console.cloud.google.com/storage/browser/breathe-prod-product-images"
+          }
+        }
+      }
+    }
+    shared = {
+      project_id = "breathe-shared"
+      console_links = {
+        cloud_build      = "https://console.cloud.google.com/cloud-build/builds;region=europe-west2?project=breathe-shared"
+        artifact_registry = "https://console.cloud.google.com/artifacts?project=breathe-shared"
+        cloud_sql        = "https://console.cloud.google.com/sql/instances/breathe-db?project=breathe-shared"
+        feed_puller      = "https://console.cloud.google.com/run/jobs/details/europe-west2/breathe-feed-puller?project=breathe-shared"
+      }
+      buckets = {
+        feeds = {
+          name = "breathe-pf-feeds"
+          url  = "https://console.cloud.google.com/storage/browser/breathe-pf-feeds"
+        }
+        build_cache = {
+          name = "breathe-build-cache"
+          url  = "https://console.cloud.google.com/storage/browser/breathe-build-cache"
+        }
+      }
+    }
+  }
+}
+
+# Upload config to GCS bucket for GCP Admin to read
+resource "google_storage_bucket_object" "gcp_admin_config" {
+  name         = "gcp-admin-config.json"
+  bucket       = google_storage_bucket.build_cache.name
+  content_type = "application/json"
+  content      = jsonencode(local.gcp_admin_config)
+}
+
+# Grant GCP Admin SA read access to the config file
+resource "google_storage_bucket_iam_member" "gcp_admin_config_reader" {
+  bucket = google_storage_bucket.build_cache.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.gcp_admin.email}"
+}
+
+# Cloud Run service for GCP Admin
+# NOTE: Cloud Run service is created by Cloud Build on first deployment
+# The `gcloud run deploy` command in cloudbuild.yaml handles service creation
+# Uncomment this block after the first successful deployment if you want Terraform to manage the service
+
+# resource "google_cloud_run_v2_service" "gcp_admin" {
+#   project  = module.project.project_id
+#   name     = "breathe-gcp-admin"
+#   location = var.region
+#
+#   template {
+#     service_account = google_service_account.gcp_admin.email
+#
+#     containers {
+#       image = "${var.region}-docker.pkg.dev/${module.project.project_id}/breathe-gcp-admin/breathe-gcp-admin:latest"
+#
+#       ports {
+#         container_port = 3000
+#       }
+#
+#       resources {
+#         limits = {
+#           cpu    = "1"
+#           memory = "512Mi"
+#         }
+#       }
+#     }
+#
+#     scaling {
+#       min_instance_count = 0
+#       max_instance_count = 2
+#     }
+#   }
+#
+#   traffic {
+#     type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+#     percent = 100
+#   }
+#
+#   depends_on = [module.artifact_registry]
+# }
+#
+# resource "google_cloud_run_v2_service_iam_member" "gcp_admin_invoker" {
+#   project  = module.project.project_id
+#   name     = google_cloud_run_v2_service.gcp_admin.name
+#   location = var.region
+#   role     = "roles/run.invoker"
+#   member   = "allUsers"
+# }
+
+# Cloud Build trigger for GCP Admin -> shared
+resource "google_cloudbuild_trigger" "gcp_admin" {
+  project     = module.project.project_id
+  name        = "breathe-gcp-admin"
+  description = "Build and deploy GCP Admin to shared on push to main"
+  location    = var.region
+
+  github {
+    owner = var.github_owner
+    name  = "breathe-gcp-admin"
+
+    push {
+      branch = "^main$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+
+  substitutions = {
+    _DEPLOY_PROJECT = module.project.project_id
+    _DEPLOY_REGION  = var.region
+    _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
+    _SERVICE_NAME   = "breathe-gcp-admin"
+  }
+
+  service_account = google_service_account.cloudbuild.id
+
+  depends_on = [module.project, google_service_account.cloudbuild]
 }
