@@ -424,8 +424,23 @@ resource "google_cloud_run_v2_service" "ecommerce" {
       }
 
       env {
-        name  = "CONFIG_BUCKET"
-        value = google_storage_bucket.config.name
+        name  = "PRICING_BUCKET_NAME"
+        value = google_storage_bucket.pf_feeds.name
+      }
+
+      env {
+        name  = "DB_HOST"
+        value = "/cloudsql/${var.shared_project_id}:${var.region}:${var.db_connection_name}"
+      }
+
+      env {
+        name  = "DB_USER"
+        value = var.db_user
+      }
+
+      env {
+        name  = "DB_NAME"
+        value = local.db_name
       }
 
       env {
@@ -500,7 +515,8 @@ resource "google_cloud_run_v2_job" "feed_processor" {
       }
 
       containers {
-        image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/breathe-pf-feed-processor/breathe-pf-feed-processor:${var.feed_processor_image_tag}"
+        command = ["/feed-processor"]
+        image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/breathe-ecommerce/breathe-ecommerce:${var.ecommerce_image_tag}"
 
         resources {
           limits = {
@@ -509,24 +525,11 @@ resource "google_cloud_run_v2_job" "feed_processor" {
           }
         }
 
-        env {
-          name  = "CONFIG_BUCKET"
-          value = google_storage_bucket.config.name
-        }
+        args = ["-storage", "gcs", "-location", google_storage_bucket.pf_feeds.name]
 
         env {
-          name  = "ENABLE_IMAGE_CACHE"
-          value = tostring(var.enable_image_cache)
-        }
-
-        env {
-          name = "DB_PASSWORD"
-          value_source {
-            secret_key_ref {
-              secret  = "projects/${var.shared_project_id}/secrets/${var.db_password_secret_id}"
-              version = "latest"
-            }
-          }
+          name  = "PRICING_BUCKET_NAME"
+          value = google_storage_bucket.pf_feeds.name
         }
       }
     }
