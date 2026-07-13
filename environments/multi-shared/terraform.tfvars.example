@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars and fill in values
+# NEVER commit terraform.tfvars — it's in .gitignore
+
+project_id = "breathe-shared"
+region     = "europe-west2"
+
+environment_project_numbers = [
+  # "123456789012",  # breathe-dev-env
+  # "234567890123",  # breathe-staging-env
+  # "345678901234",  # breathe-production-env
+]
+
+github_owner = "jpartner"
+
+# Zitadel
+zitadel_domain        = "auth.breathebranding.co.uk"
+zitadel_db_connection = "breathe-shared:europe-west2:breathe-db"

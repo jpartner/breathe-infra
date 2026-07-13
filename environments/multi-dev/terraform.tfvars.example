@@ -1,0 +1,16 @@
+# Copy to terraform.tfvars and fill in values
+
+project_id        = "breathe-dev-env"
+shared_project_id = "breathe-shared"
+environment       = "dev"
+
+# From shared terraform output
+vpc_connector_id   = "projects/breathe-shared/locations/europe-west2/connectors/breathe-vpc-connector"
+db_connection_name = "breathe-shared:europe-west2:breathe-db"
+
+# Database
+db_name = "breathe_multi_dev"
+db_user = "app"
+
+# Auth (Zitadel URL from shared output)
+auth_issuer_url = "https://auth.breathebranding.co.uk"

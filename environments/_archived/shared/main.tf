@@ -402,6 +402,39 @@ resource "google_cloudbuild_trigger" "backend_dev" {
   depends_on = [module.project, google_service_account.cloudbuild]
 }
 
+# Backend (breathe-backend-go) -> dev
+resource "google_cloudbuild_trigger" "backend_go_dev" {
+  project     = module.project.project_id
+  name        = "breathe-backend-go-dev"
+  description = "Build and deploy breathe-ecommerce (Go) to dev on push to master"
+  location    = var.region
+
+  github {
+    owner = var.github_owner
+    name  = "breathe-backend-go"
+
+    push {
+      branch = "^master$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+
+  substitutions = {
+    _DEPLOY_PROJECT        = "breathe-dev-env"
+    _ENV_NAME              = "dev"
+    _DB_NAME               = "breathe_dev"
+    _DEPLOY_REGION         = var.region
+    _AR_HOSTNAME           = "${var.region}-docker.pkg.dev"
+    _SHARED_PROJECT        = module.project.project_id
+    _CUSTOMER_FRONTEND_URL = "https://dev.breathebranding.co.uk"
+  }
+
+  service_account = google_service_account.cloudbuild.id
+
+  depends_on = [module.project, google_service_account.cloudbuild]
+}
+
 # Pricing Rust service -> dev
 resource "google_cloudbuild_trigger" "pricing_rust_dev" {
   project     = module.project.project_id

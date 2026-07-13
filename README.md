@@ -1,162 +1,80 @@
 # Breathe Infrastructure
 
-Terraform-based Infrastructure as Code for Breathe B2B e-commerce platform.
+Terraform-managed infrastructure for the Breathe multi-tenant B2B e-commerce platform.
 
-## Overview
+## Architecture
 
-This repository contains Terraform configurations for managing Breathe's GCP infrastructure across multiple environments.
+```
+breathe-shared              breathe-dev-env         breathe-staging-env     breathe-production-env
+├── Artifact Registry       ├── Cloud Run (backend) ├── Cloud Run (backend) ├── Cloud Run (backend)
+├── Cloud Build triggers    ├── Cloud Run (admin)   ├── Cloud Run (admin)   ├── Cloud Run (admin)
+├── VPC + Connector         ├── Cloud Run Job       ├── Cloud Run Job       ├── Cloud Run Job
+├── Zitadel (auth server)   ├── GCS (product data)  ├── GCS (product data)  ├── GCS (product data)
+├── Terraform state bucket  ├── GCS (raw feeds)     ├── GCS (raw feeds)     ├── GCS (raw feeds)
+└── Cloud SQL (shared)      ├── GCS (images)        ├── GCS (images)        ├── GCS (images)
+                            ├── Secrets             ├── Secrets             ├── Secrets
+                            └── Service Accounts    └── Service Accounts    └── Service Accounts
+```
 
-## Project Structure
+## Structure
 
 ```
 breathe-infra/
-├── requirements/              # Architecture documentation
-│   ├── 01-current-state.md   # Analysis of existing infrastructure
-│   ├── 02-target-architecture.md  # Target state design
-│   ├── 03-migration-plan.md  # Staged migration approach
-│   └── 04-service-inventory.md    # Service requirements
-│
-├── modules/                   # Reusable Terraform modules
-│   ├── project/              # GCP project creation
-│   ├── artifact-registry/    # Container image repositories
-│   ├── networking/           # VPC, subnets, connectors
-│   ├── cloud-sql/            # PostgreSQL instance
-│   └── environment/          # Per-environment resources
-│
-├── environments/             # Environment-specific configs
-│   ├── shared/               # Shared project (builds, DB, artifacts)
-│   ├── dev/                  # Development environment
-│   ├── staging/              # Staging environment
-│   └── production/           # Production environment
-│
-└── tools/                    # Operational tooling (TODO)
-    └── promote/              # Image promotion tool
+├── modules/                          # Reusable Terraform modules
+│   ├── networking/                   # VPC, subnets, connectors
+│   ├── cloud-sql/                    # PostgreSQL instance
+│   ├── zitadel/                      # Self-hosted auth server (Cloud Run)
+│   └── ...
+├── environments/
+│   ├── multi-shared/                 # Shared infrastructure (AR, builds, auth, networking)
+│   ├── multi-dev/                    # Dev environment
+│   ├── multi-staging/                # Staging environment
+│   ├── multi-prod/                   # Production environment
+│   └── _archived/                    # Old single-tenant configs (reference only)
+└── README.md
 ```
 
-## Target Architecture
+## Remote State
 
-```
-breathe-shared          breathe-dev-env    breathe-staging-env    breathe-production-env
-├── Artifact Registry   ├── Cloud Run      ├── Cloud Run          ├── Cloud Run
-├── Cloud Build         ├── Cloud Jobs     ├── Cloud Jobs         ├── Cloud Jobs
-├── Cloud SQL           ├── GCS (env)      ├── GCS (env)          ├── GCS (env)
-├── VPC + Connector     ├── Secrets        ├── Secrets            ├── Secrets
-└── GCS (shared)        └── Service Accts  └── Service Accts      └── Service Accts
-```
+All state is stored in GCS: `gs://breathe-terraform-state/{environment}`
 
-## Getting Started
+## Deployment Order
 
-### Prerequisites
+1. **multi-shared** first (networking, Artifact Registry, Zitadel, Cloud Build)
+2. **multi-dev** (can deploy after shared is up)
+3. **multi-staging** / **multi-prod** (same structure as dev)
 
-- Terraform >= 1.5
-- gcloud CLI authenticated with appropriate permissions
-- Billing account ID
-
-### Deployment Order
-
-Infrastructure must be deployed in this order:
-
-1. **Shared project first** (contains Artifact Registry, Cloud SQL, VPC)
-2. **Environment projects** (can be deployed in parallel after shared)
-
-### Deploy Shared Project
+### Deploy
 
 ```bash
-cd environments/shared
-
-# Create terraform.tfvars from example
+cd environments/multi-shared
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your billing_account
+# Edit terraform.tfvars with your values
 
 terraform init
 terraform plan
 terraform apply
 ```
 
-### Deploy Environment Project
+## Multi-Tenancy
 
-```bash
-cd environments/dev  # or staging, production
+Tenancy is managed at the application layer, not infrastructure. All tenants share:
+- The same Cloud Run services (tenant resolved from `X-Tenant-Id` header)
+- The same database (tenant isolation via `tenant_id` column)
+- The same GCS buckets (tenant isolation via path prefix)
 
-# Create terraform.tfvars from example
-cp terraform.tfvars.example terraform.tfvars
-# Edit with your billing_account and shared project outputs
+Tenant-specific configuration (supplier credentials, Stripe keys, margins) is stored
+in the database, not in environment variables.
 
-terraform init
-terraform plan
-terraform apply
-```
+## Auth (Zitadel)
 
-### Create Database Schemas
+Self-hosted Zitadel runs on Cloud Run in the shared project. Each tenant is a
+Zitadel Organization. New environments use Zitadel; the existing `breathe-dev`
+project continues using Auth0 unchanged.
 
-Database schemas are **opt-in** to avoid requiring Cloud SQL Proxy for normal Terraform operations.
+## Important
 
-```bash
-cd environments/shared
-
-# 1. Start Cloud SQL Proxy in a separate terminal
-cloud-sql-proxy --port 5432 breathe-shared:europe-west2:breathe-db
-
-# 2. Get the database admin password from Secret Manager
-gcloud secrets versions access latest --secret=db-password --project=breathe-shared
-
-# 3. Apply with schema management enabled
-terraform apply \
-  -var="manage_db_schemas=true" \
-  -var="db_admin_password=<password_from_step_2>"
-```
-
-This creates an `app` schema in each environment database (breathe_dev, breathe_staging, breathe_prod).
-
-**Note:** Normal `terraform plan/apply` commands work without the proxy - schema management is disabled by default.
-
-## Modules
-
-### project
-Creates a GCP project with required APIs enabled.
-
-### artifact-registry
-Creates Docker repositories with lifecycle policies for image cleanup.
-
-### networking
-Creates VPC, subnets, VPC connector for Cloud Run, and private service connection for Cloud SQL.
-
-### cloud-sql
-Creates PostgreSQL instance with private IP, multiple databases, and stores password in Secret Manager.
-
-### environment
-Creates per-environment resources: service accounts, GCS buckets, and IAM bindings.
-
-### database-schemas
-Creates PostgreSQL schemas within Cloud SQL databases. Requires Cloud SQL Proxy running locally.
-
-## Documentation
-
-- [Current State Analysis](requirements/01-current-state.md)
-- [Target Architecture](requirements/02-target-architecture.md)
-- [Migration Plan](requirements/03-migration-plan.md)
-- [Service Inventory](requirements/04-service-inventory.md)
-
-## Migration Status
-
-- [x] Phase 0.0: Create repository
-- [x] Phase 0.0: Document current state
-- [x] Phase 0.0: Document target architecture
-- [x] Phase 0.0: Create Terraform modules
-- [ ] Phase 0.1: Deploy shared project
-- [ ] Phase 0.2: Deploy dev environment
-- [ ] Phase 0.3: Deploy staging environment
-- [ ] Phase 0.4: Deploy production environment
-- [ ] Phase 1: Create Cloud Build triggers
-- [ ] Phase 2: Deploy services to dev
-- [ ] Phase 3: Test and validate
-- [ ] Phase 4: Traffic migration
-- [ ] Phase 5: Cleanup old infrastructure
-
-## Important Notes
-
-- **Do NOT modify existing `breathe-dev` project** until new environments are validated
-- Deploy shared project before any environment projects
-- All infrastructure changes must go through Terraform
-- Production changes require approval
-- Never commit `terraform.tfvars` files (they contain billing info)
+- **NEVER modify `breathe-dev`** — this is the live single-tenant system
+- **NEVER commit `terraform.tfvars`** — contains project-specific values
+- All changes go through Terraform — no manual GCP console changes
+- Production changes require review
