@@ -34,8 +34,7 @@ resource "google_compute_backend_service" "backends" {
   project = var.project_id
   name    = "backend-${each.key}"
 
-  protocol    = "HTTP"
-  timeout_sec = each.value.timeout_sec
+  protocol = "HTTP"
 
   backend {
     group = google_compute_region_network_endpoint_group.backends[each.key].id

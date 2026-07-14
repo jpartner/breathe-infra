@@ -31,6 +31,13 @@ resource "google_secret_manager_secret_iam_member" "zitadel_masterkey" {
   member    = "serviceAccount:${google_service_account.zitadel.email}"
 }
 
+resource "google_secret_manager_secret_iam_member" "zitadel_admin_password" {
+  project   = var.project_id
+  secret_id = var.db_admin_password_secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.zitadel.email}"
+}
+
 # Cloud Run service for Zitadel
 resource "google_cloud_run_v2_service" "zitadel" {
   name     = "zitadel"
@@ -60,7 +67,9 @@ resource "google_cloud_run_v2_service" "zitadel" {
     }
 
     containers {
-      image = var.image
+      image   = var.image
+      command = ["/app/zitadel"]
+      args    = ["start-from-init", "--tlsMode", "external", "--masterkeyFromEnv"]
 
       ports {
         container_port = 8080
@@ -92,7 +101,7 @@ resource "google_cloud_run_v2_service" "zitadel" {
 
       env {
         name  = "ZITADEL_DATABASE_POSTGRES_HOST"
-        value = "/cloudsql/${var.db_instance_connection}"
+        value = var.db_host
       }
 
       env {
@@ -111,10 +120,35 @@ resource "google_cloud_run_v2_service" "zitadel" {
       }
 
       env {
+        name  = "ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME"
+        value = "postgres"
+      }
+
+      env {
+        name  = "ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE"
+        value = "disable"
+      }
+
+      env {
+        name  = "ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE"
+        value = "disable"
+      }
+
+      env {
         name = "ZITADEL_DATABASE_POSTGRES_USER_PASSWORD"
         value_source {
           secret_key_ref {
             secret  = "projects/${var.project_id}/secrets/${var.db_password_secret_id}"
+            version = "latest"
+          }
+        }
+      }
+
+      env {
+        name = "ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.project_id}/secrets/${var.db_admin_password_secret_id}"
             version = "latest"
           }
         }

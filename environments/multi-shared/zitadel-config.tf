@@ -1,18 +1,9 @@
 # Zitadel identity configuration
 # Manages organizations, projects, and OIDC applications for all tenants/environments.
 #
-# Bootstrap: create a service account in the Zitadel UI, download the JSON key,
-# then set the path via ZITADEL_SERVICE_ACCOUNT_KEY_PATH environment variable
-# before running terraform.
-
-terraform {
-  required_providers {
-    zitadel = {
-      source  = "zitadel/zitadel"
-      version = "~> 3.2"
-    }
-  }
-}
+# IMPORTANT: This requires Zitadel to be running. On first apply, run with
+# zitadel_manage_config=false, then re-apply with zitadel_manage_config=true
+# after Zitadel is up and a service user key has been created.
 
 provider "zitadel" {
   domain           = var.zitadel_domain
@@ -22,6 +13,7 @@ provider "zitadel" {
 }
 
 module "zitadel_config" {
+  count  = var.zitadel_manage_config ? 1 : 0
   source = "../../modules/zitadel-config"
 
   tenants = {

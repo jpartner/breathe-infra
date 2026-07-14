@@ -1,7 +1,5 @@
 # Multi-Tenant Shared Infrastructure
-# Contains: Artifact Registry, Cloud Build, VPC/networking, Zitadel auth server
-#
-# Project: breathe-shared (existing, cleaned)
+# Everything in breathe-shared is managed by this config.
 # Remote state: gs://breathe-terraform-state/multi-shared
 
 terraform {
@@ -15,6 +13,14 @@ terraform {
     google-beta = {
       source  = "hashicorp/google-beta"
       version = "~> 5.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+    zitadel = {
+      source  = "zitadel/zitadel"
+      version = "~> 3.2"
     }
   }
 
@@ -35,44 +41,178 @@ provider "google-beta" {
 }
 
 # =============================================================================
-# APIs
+# Networking (pre-existing, read-only)
+# VPC, subnets, connector were created previously and are stable.
+# Using data sources to reference them without managing their lifecycle.
 # =============================================================================
 
-resource "google_project_service" "apis" {
-  for_each = toset([
-    "cloudresourcemanager.googleapis.com",
-    "serviceusage.googleapis.com",
-    "iam.googleapis.com",
-    "compute.googleapis.com",
-    "artifactregistry.googleapis.com",
-    "cloudbuild.googleapis.com",
-    "run.googleapis.com",
-    "sqladmin.googleapis.com",
-    "servicenetworking.googleapis.com",
-    "secretmanager.googleapis.com",
-    "vpcaccess.googleapis.com",
-    "storage.googleapis.com",
-    "cloudscheduler.googleapis.com",
-  ])
-
+data "google_compute_network" "vpc" {
   project = var.project_id
-  service = each.value
+  name    = "breathe-vpc"
+}
 
-  disable_dependent_services = false
-  disable_on_destroy         = false
+data "google_vpc_access_connector" "connector" {
+  project = var.project_id
+  region  = var.region
+  name    = "breathe-vpc-connector"
+}
+
+locals {
+  vpc_network_id   = data.google_compute_network.vpc.id
+  vpc_connector_id = data.google_vpc_access_connector.connector.id
 }
 
 # =============================================================================
-# Networking
+# Cloud SQL
 # =============================================================================
 
-module "networking" {
-  source = "../../modules/networking"
+resource "random_password" "db_admin" {
+  length  = 32
+  special = false
+}
 
-  project_id = var.project_id
-  region     = var.region
+resource "random_password" "db_app" {
+  length  = 32
+  special = false
+}
 
-  depends_on = [google_project_service.apis]
+resource "random_password" "db_zitadel" {
+  length  = 32
+  special = false
+}
+
+resource "random_password" "zitadel_masterkey" {
+  length  = 32
+  special = false
+}
+
+resource "google_sql_database_instance" "main" {
+  project          = var.project_id
+  name             = "breathe-multi-db"
+  region           = var.region
+  database_version = "POSTGRES_16"
+
+  settings {
+    tier              = var.db_tier
+    availability_type = "ZONAL"
+    edition           = "ENTERPRISE"
+    disk_size         = 10
+    disk_type         = "PD_SSD"
+    disk_autoresize   = true
+
+    ip_configuration {
+      ipv4_enabled                                  = false
+      private_network                               = local.vpc_network_id
+      enable_private_path_for_google_cloud_services  = true
+    }
+
+    backup_configuration {
+      enabled                        = true
+      start_time                     = "02:00"
+      point_in_time_recovery_enabled = true
+      transaction_log_retention_days = 7
+
+      backup_retention_settings {
+        retained_backups = 7
+      }
+    }
+  }
+
+  deletion_protection = false # Set true for production
+
+}
+
+# Databases
+resource "google_sql_database" "envs" {
+  for_each = toset(["breathe_multi_dev", "breathe_multi_staging", "breathe_multi_prod"])
+
+  project  = var.project_id
+  instance = google_sql_database_instance.main.name
+  name     = each.value
+}
+
+resource "google_sql_database" "zitadel" {
+  project  = var.project_id
+  instance = google_sql_database_instance.main.name
+  name     = "zitadel"
+}
+
+# Users
+resource "google_sql_user" "admin" {
+  project  = var.project_id
+  instance = google_sql_database_instance.main.name
+  name     = "postgres"
+  password = random_password.db_admin.result
+}
+
+resource "google_sql_user" "app" {
+  project  = var.project_id
+  instance = google_sql_database_instance.main.name
+  name     = "app"
+  password = random_password.db_app.result
+}
+
+resource "google_sql_user" "zitadel" {
+  project  = var.project_id
+  instance = google_sql_database_instance.main.name
+  name     = "zitadel"
+  password = random_password.db_zitadel.result
+}
+
+# =============================================================================
+# Secrets
+# =============================================================================
+
+resource "google_secret_manager_secret" "db_admin_password" {
+  project   = var.project_id
+  secret_id = "db-admin-password"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "db_admin_password" {
+  secret      = google_secret_manager_secret.db_admin_password.id
+  secret_data = random_password.db_admin.result
+}
+
+resource "google_secret_manager_secret" "db_app_password" {
+  project   = var.project_id
+  secret_id = "db-app-password"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "db_app_password" {
+  secret      = google_secret_manager_secret.db_app_password.id
+  secret_data = random_password.db_app.result
+}
+
+resource "google_secret_manager_secret" "zitadel_db_password" {
+  project   = var.project_id
+  secret_id = "zitadel-db-password"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "zitadel_db_password" {
+  secret      = google_secret_manager_secret.zitadel_db_password.id
+  secret_data = random_password.db_zitadel.result
+}
+
+resource "google_secret_manager_secret" "zitadel_masterkey" {
+  project   = var.project_id
+  secret_id = "zitadel-masterkey"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "zitadel_masterkey" {
+  secret      = google_secret_manager_secret.zitadel_masterkey.id
+  secret_data = random_password.zitadel_masterkey.result
 }
 
 # =============================================================================
@@ -80,11 +220,7 @@ module "networking" {
 # =============================================================================
 
 resource "google_artifact_registry_repository" "images" {
-  for_each = toset([
-    "breathe-backend",
-    "breathe-admin",
-    "breathe-zitadel",
-  ])
+  for_each = toset(["breathe-backend", "breathe-admin"])
 
   project       = var.project_id
   location      = var.region
@@ -100,7 +236,6 @@ resource "google_artifact_registry_repository" "images" {
     }
   }
 
-  depends_on = [google_project_service.apis]
 }
 
 # =============================================================================
@@ -112,10 +247,8 @@ resource "google_service_account" "cloudbuild" {
   account_id   = "sa-cloudbuild"
   display_name = "Cloud Build Service Account"
 
-  depends_on = [google_project_service.apis]
 }
 
-# Cloud Build can push to all Artifact Registry repos
 resource "google_artifact_registry_repository_iam_member" "cloudbuild_writer" {
   for_each = google_artifact_registry_repository.images
 
@@ -126,7 +259,6 @@ resource "google_artifact_registry_repository_iam_member" "cloudbuild_writer" {
   member     = "serviceAccount:${google_service_account.cloudbuild.email}"
 }
 
-# Cloud Build can deploy to Cloud Run in all environment projects
 resource "google_project_iam_member" "cloudbuild_run_admin" {
   for_each = toset(var.environment_project_ids)
 
@@ -149,7 +281,7 @@ resource "google_project_iam_member" "cloudbuild_logs" {
   member  = "serviceAccount:${google_service_account.cloudbuild.email}"
 }
 
-# Grant environment Cloud Run service agents access to shared Artifact Registry
+# Grant environment Cloud Run service agents access to shared resources
 resource "google_project_iam_member" "env_ar_reader" {
   for_each = toset(var.environment_project_numbers)
 
@@ -158,7 +290,6 @@ resource "google_project_iam_member" "env_ar_reader" {
   member  = "serviceAccount:service-${each.value}@serverless-robot-prod.iam.gserviceaccount.com"
 }
 
-# Grant environment Cloud Run service agents VPC connector access
 resource "google_project_iam_member" "env_vpc_user" {
   for_each = toset(var.environment_project_numbers)
 
@@ -203,7 +334,6 @@ resource "google_cloudbuild_trigger" "backend" {
 
   service_account = google_service_account.cloudbuild.id
 
-  depends_on = [google_project_service.apis]
 }
 
 # =============================================================================
@@ -215,16 +345,52 @@ module "zitadel" {
 
   project_id       = var.project_id
   region           = var.region
-  vpc_connector_id = module.networking.vpc_connector_id
+  vpc_connector_id = local.vpc_connector_id
 
-  db_instance_connection = var.zitadel_db_connection
-  db_name                = "zitadel"
-  db_user                = "zitadel"
-  db_password_secret_id  = var.zitadel_db_password_secret_id
+  db_host                    = google_sql_database_instance.main.private_ip_address
+  db_name                    = "zitadel"
+  db_user                    = "zitadel"
+  db_password_secret_id      = google_secret_manager_secret.zitadel_db_password.secret_id
+  db_admin_password_secret_id = google_secret_manager_secret.db_admin_password.secret_id
 
-  domain        = var.zitadel_domain
-  image         = "${var.region}-docker.pkg.dev/${var.project_id}/breathe-zitadel/zitadel:latest"
-  masterkey_secret_id = var.zitadel_masterkey_secret_id
+  domain              = var.zitadel_domain
+  image               = "ghcr.io/zitadel/zitadel:v2.71.5"
+  masterkey_secret_id = google_secret_manager_secret.zitadel_masterkey.secret_id
 
-  depends_on = [google_project_service.apis, module.networking]
+  depends_on = [
+    google_sql_database.zitadel,
+    google_sql_user.zitadel,
+    google_secret_manager_secret_version.zitadel_db_password,
+    google_secret_manager_secret_version.zitadel_masterkey,
+  ]
+}
+
+# =============================================================================
+# Platform Load Balancer
+# =============================================================================
+
+module "platform_lb" {
+  source = "../../modules/platform-lb"
+
+  project_id = var.project_id
+
+  backends = {
+    zitadel = {
+      cloud_run_service = "zitadel"
+      region            = var.region
+    }
+  }
+
+  host_rules = {
+    auth = {
+      hosts   = [var.zitadel_domain]
+      backend = "zitadel"
+    }
+  }
+
+  default_backend = "zitadel"
+
+  domains = [var.zitadel_domain]
+
+  depends_on = [module.zitadel]
 }

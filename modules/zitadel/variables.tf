@@ -12,8 +12,13 @@ variable "vpc_connector_id" {
   type        = string
 }
 
-variable "db_instance_connection" {
-  description = "Cloud SQL instance connection name"
+variable "db_host" {
+  description = "Database host (private IP)"
+  type        = string
+}
+
+variable "db_admin_password_secret_id" {
+  description = "Secret Manager ID for the postgres admin password"
   type        = string
 }
 

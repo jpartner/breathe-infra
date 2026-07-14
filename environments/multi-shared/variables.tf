@@ -34,26 +34,21 @@ variable "zitadel_domain" {
   default     = "auth.breathebranding.co.uk"
 }
 
-variable "zitadel_db_connection" {
-  description = "Cloud SQL connection name for Zitadel database"
-  type        = string
-  default     = ""
-}
-
-variable "zitadel_db_password_secret_id" {
-  description = "Secret Manager secret ID for Zitadel DB password"
-  type        = string
-  default     = "zitadel-db-password"
-}
-
-variable "zitadel_masterkey_secret_id" {
-  description = "Secret Manager secret ID for Zitadel master key"
-  type        = string
-  default     = "zitadel-masterkey"
-}
-
 variable "zitadel_service_account_key_path" {
   description = "Path to Zitadel service account JSON key (for Terraform provider auth)"
   type        = string
   default     = ""
+}
+
+variable "zitadel_manage_config" {
+  description = "Whether to manage Zitadel orgs/projects/apps (requires Zitadel running + service user key)"
+  type        = bool
+  default     = false
+}
+
+# Database
+variable "db_tier" {
+  description = "Cloud SQL machine tier"
+  type        = string
+  default     = "db-custom-2-8192"
 }
