@@ -51,3 +51,9 @@ variable "zitadel_masterkey_secret_id" {
   type        = string
   default     = "zitadel-masterkey"
 }
+
+variable "zitadel_service_account_key_path" {
+  description = "Path to Zitadel service account JSON key (for Terraform provider auth)"
+  type        = string
+  default     = ""
+}
