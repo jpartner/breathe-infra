@@ -47,3 +47,9 @@ variable "image" {
   type        = string
   default     = "ghcr.io/zitadel/zitadel:latest"
 }
+
+variable "domains" {
+  description = "Custom domains for Zitadel (one per tenant auth domain)"
+  type        = list(string)
+  default     = []
+}
