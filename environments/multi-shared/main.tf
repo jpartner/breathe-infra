@@ -220,7 +220,7 @@ resource "google_secret_manager_secret_version" "zitadel_masterkey" {
 # =============================================================================
 
 resource "google_artifact_registry_repository" "images" {
-  for_each = toset(["breathe-backend", "breathe-admin"])
+  for_each = toset(["breathe-backend", "breathe-admin", "breathe-pdf"])
 
   project       = var.project_id
   location      = var.region
@@ -299,18 +299,13 @@ resource "google_project_iam_member" "env_vpc_user" {
 }
 
 # =============================================================================
-# Cloud Build Triggers
+# Cloud Build Triggers — all on multi-tenant branch, deploy to dev
 # =============================================================================
 
-resource "google_cloudbuild_trigger" "backend" {
-  for_each = tomap({
-    dev     = { branch = "^main$", project = "breathe-dev-env" }
-    staging = { branch = "^staging$", project = "breathe-staging-env" }
-  })
-
+resource "google_cloudbuild_trigger" "backend_dev" {
   project     = var.project_id
-  name        = "breathe-backend-${each.key}"
-  description = "Build and deploy backend to ${each.key}"
+  name        = "breathe-backend-dev"
+  description = "Build and deploy backend to dev on push to multi-tenant"
   location    = var.region
 
   github {
@@ -318,23 +313,81 @@ resource "google_cloudbuild_trigger" "backend" {
     name  = "breathe-java"
 
     push {
-      branch = each.value.branch
+      branch = "^multi-tenant$"
     }
   }
 
   filename = "cloudbuild.yaml"
 
   substitutions = {
-    _DEPLOY_PROJECT = each.value.project
-    _ENV_NAME       = each.key
+    _DEPLOY_PROJECT = "breathe-dev-env"
+    _ENV_NAME       = "dev"
     _DEPLOY_REGION  = var.region
     _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
     _SHARED_PROJECT = var.project_id
   }
 
   service_account = google_service_account.cloudbuild.id
-
 }
+
+resource "google_cloudbuild_trigger" "admin_dev" {
+  project     = var.project_id
+  name        = "breathe-admin-dev"
+  description = "Build and deploy admin to dev on push to multi-tenant"
+  location    = var.region
+
+  github {
+    owner = var.github_owner
+    name  = "breathe-admin-nuxt-claude"
+
+    push {
+      branch = "^multi-tenant$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+
+  substitutions = {
+    _DEPLOY_PROJECT = "breathe-dev-env"
+    _ENV_NAME       = "dev"
+    _DEPLOY_REGION  = var.region
+    _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
+    _SHARED_PROJECT = var.project_id
+    _SERVICE_NAME   = "breathe-admin"
+  }
+
+  service_account = google_service_account.cloudbuild.id
+}
+
+resource "google_cloudbuild_trigger" "pdf_dev" {
+  project     = var.project_id
+  name        = "breathe-pdf-dev"
+  description = "Build and deploy PDF service to dev on push to multi-tenant"
+  location    = var.region
+
+  github {
+    owner = var.github_owner
+    name  = "breathe-pdf-creation"
+
+    push {
+      branch = "^multi-tenant$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+
+  substitutions = {
+    _DEPLOY_PROJECT = "breathe-dev-env"
+    _ENV_NAME       = "dev"
+    _DEPLOY_REGION  = var.region
+    _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
+    _SHARED_PROJECT = var.project_id
+    _SERVICE_NAME   = "breathe-pdf"
+  }
+
+  service_account = google_service_account.cloudbuild.id
+}
+
 
 # =============================================================================
 # Zitadel Auth Server

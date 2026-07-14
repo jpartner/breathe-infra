@@ -23,8 +23,8 @@ variable "roles" {
     group        = string
   }))
   default = [
-    { key = "admin",    display_name = "Administrator", group = "staff" },
-    { key = "manager",  display_name = "Manager",       group = "staff" },
-    { key = "customer", display_name = "Customer",      group = "customers" },
+    { key = "admin",    display_name = "Administrator",          group = "staff" },
+    { key = "csr",      display_name = "Customer Service",       group = "staff" },
+    { key = "customer", display_name = "Customer",               group = "customers" },
   ]
 }
