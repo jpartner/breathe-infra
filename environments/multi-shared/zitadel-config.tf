@@ -53,3 +53,26 @@ module "zitadel_config" {
     }
   }
 }
+
+# =============================================================================
+# SMTP — Postmark for auth emails
+# =============================================================================
+
+resource "google_secret_manager_secret" "postmark_auth_token" {
+  project   = var.project_id
+  secret_id = "postmark-auth-token"
+  replication {
+    auto {}
+  }
+}
+
+resource "zitadel_smtp_config" "postmark" {
+  count = var.zitadel_manage_config ? 1 : 0
+
+  sender_address = var.zitadel_smtp_sender
+  sender_name    = "Breathe"
+  tls            = true
+  host           = "smtp.postmarkapp.com:587"
+  user           = var.zitadel_smtp_password
+  password       = var.zitadel_smtp_password
+}

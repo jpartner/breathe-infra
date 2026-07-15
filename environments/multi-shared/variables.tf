@@ -46,6 +46,19 @@ variable "zitadel_manage_config" {
   default     = false
 }
 
+variable "zitadel_smtp_sender" {
+  description = "Sender email address for Zitadel auth emails"
+  type        = string
+  default     = "hello@breathebranding.co.uk"
+}
+
+variable "zitadel_smtp_password" {
+  description = "Postmark Server API token for SMTP auth"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # Database
 variable "db_tier" {
   description = "Cloud SQL machine tier"
