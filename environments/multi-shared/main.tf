@@ -137,6 +137,12 @@ resource "google_sql_database" "zitadel" {
   name     = "zitadel"
 }
 
+resource "google_sql_database" "test_runner" {
+  project  = var.project_id
+  instance = google_sql_database_instance.main.name
+  name     = "breathe_test"
+}
+
 # Users
 resource "google_sql_user" "admin" {
   project  = var.project_id
@@ -220,7 +226,7 @@ resource "google_secret_manager_secret_version" "zitadel_masterkey" {
 # =============================================================================
 
 resource "google_artifact_registry_repository" "images" {
-  for_each = toset(["breathe-backend", "breathe-admin", "breathe-pdf"])
+  for_each = toset(["breathe-backend", "breathe-admin", "breathe-pdf", "breathe-test-runner"])
 
   project       = var.project_id
   location      = var.region
@@ -388,6 +394,219 @@ resource "google_cloudbuild_trigger" "pdf_dev" {
   service_account = google_service_account.cloudbuild.id
 }
 
+resource "google_cloudbuild_trigger" "test_runner" {
+  project     = var.project_id
+  name        = "breathe-test-runner"
+  description = "Build and deploy test runner on push to main"
+  location    = var.region
+
+  github {
+    owner = var.github_owner
+    name  = "breathe-multi-test"
+
+    push {
+      branch = "^main$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+
+  substitutions = {
+    _DEPLOY_PROJECT = var.project_id
+    _ENV_NAME       = "shared"
+    _DEPLOY_REGION  = var.region
+    _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
+    _SHARED_PROJECT = var.project_id
+    _SERVICE_NAME   = "breathe-test-runner"
+  }
+
+  service_account = google_service_account.cloudbuild.id
+}
+
+# =============================================================================
+# Test Runner — Cloud Run service in shared project
+# =============================================================================
+
+resource "google_service_account" "test_runner" {
+  project      = var.project_id
+  account_id   = "sa-test-runner"
+  display_name = "Test Runner Service Account"
+}
+
+# Test runner needs Cloud SQL access for its own database
+resource "google_project_iam_member" "test_runner_sql" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.test_runner.email}"
+}
+
+# Test runner needs to read the DB password
+resource "google_secret_manager_secret_iam_member" "test_runner_db" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.db_app_password.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.test_runner.email}"
+}
+
+# GCS bucket for test execution logs
+resource "google_storage_bucket" "test_logs" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-test-logs"
+  location                    = var.region
+  uniform_bucket_level_access = true
+
+  lifecycle_rule {
+    condition { age = 90 }
+    action { type = "Delete" }
+  }
+
+  labels = {
+    managed_by = "terraform"
+  }
+}
+
+resource "google_storage_bucket_iam_member" "test_runner_logs" {
+  bucket = google_storage_bucket.test_logs.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.test_runner.email}"
+}
+
+# Test runner needs to update Cloud Run services in dev and staging (for promotion)
+resource "google_project_iam_member" "test_runner_run_admin" {
+  for_each = toset(var.environment_project_ids)
+
+  project = each.value
+  role    = "roles/run.admin"
+  member  = "serviceAccount:${google_service_account.test_runner.email}"
+}
+
+resource "google_project_iam_member" "test_runner_sa_user" {
+  for_each = toset(var.environment_project_ids)
+
+  project = each.value
+  role    = "roles/iam.serviceAccountUser"
+  member  = "serviceAccount:${google_service_account.test_runner.email}"
+}
+
+resource "google_cloud_run_v2_service" "test_runner" {
+  name     = "breathe-test-runner"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
+  template {
+    service_account = google_service_account.test_runner.email
+
+    vpc_access {
+      connector = local.vpc_connector_id
+      egress    = "PRIVATE_RANGES_ONLY"
+    }
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 1
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.project_id}/breathe-test-runner/breathe-test-runner:latest"
+
+      ports {
+        container_port = 3000
+      }
+
+      resources {
+        limits = {
+          cpu    = "2"
+          memory = "2Gi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      env {
+        name  = "DEV_BACKEND_URL"
+        value = "https://breathe-backend-g5eqfyjkfa-nw.a.run.app"
+      }
+      env {
+        name  = "DEV_ADMIN_URL"
+        value = "https://breathe-admin-g5eqfyjkfa-nw.a.run.app"
+      }
+      env {
+        name  = "DEV_PDF_URL"
+        value = "https://breathe-pdf-g5eqfyjkfa-nw.a.run.app"
+      }
+      env {
+        name  = "GCP_DEV_PROJECT"
+        value = "breathe-dev-env"
+      }
+      env {
+        name  = "GCP_STAGING_PROJECT"
+        value = "breathe-staging-env"
+      }
+      env {
+        name  = "GCP_REGION"
+        value = var.region
+      }
+      env {
+        name  = "DB_HOST"
+        value = google_sql_database_instance.main.private_ip_address
+      }
+      env {
+        name  = "DB_NAME"
+        value = "breathe_test"
+      }
+      env {
+        name  = "DB_USER"
+        value = "app"
+      }
+      env {
+        name = "DB_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.db_app_password.id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name  = "TEST_LOGS_BUCKET"
+        value = google_storage_bucket.test_logs.name
+      }
+
+      startup_probe {
+        tcp_socket {
+          port = 3000
+        }
+        initial_delay_seconds = 5
+        timeout_seconds       = 5
+        period_seconds        = 10
+        failure_threshold     = 12
+      }
+    }
+
+    timeout = "3600s"
+  }
+
+  labels = {
+    managed_by = "terraform"
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "test_runner_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.test_runner.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
 
 # =============================================================================
 # Zitadel Auth Server
