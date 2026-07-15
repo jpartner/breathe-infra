@@ -175,42 +175,23 @@ resource "google_storage_bucket_iam_member" "catalogue_images" {
 }
 
 # =============================================================================
-# Secrets
+# Secrets — DB password is in breathe-shared, Stripe is per-environment
 # =============================================================================
 
-resource "google_secret_manager_secret" "db_password" {
-  project   = var.project_id
-  secret_id = "db-password"
-
-  replication { auto {} }
-  labels = { managed_by = "terraform" }
-
-  depends_on = [google_project_service.apis]
-}
-
-resource "google_secret_manager_secret" "stripe_key" {
-  project   = var.project_id
-  secret_id = "stripe-api-key"
-
-  replication { auto {} }
-  labels = { managed_by = "terraform" }
-
-  depends_on = [google_project_service.apis]
-}
-
-# Grant backend access to secrets
+# Grant backend access to shared DB password
 resource "google_secret_manager_secret_iam_member" "backend_db" {
-  project   = var.project_id
-  secret_id = google_secret_manager_secret.db_password.secret_id
+  project   = var.shared_project_id
+  secret_id = "db-app-password"
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
 
-resource "google_secret_manager_secret_iam_member" "backend_stripe" {
-  project   = var.project_id
-  secret_id = google_secret_manager_secret.stripe_key.secret_id
+# Grant catalogue job access to shared DB password
+resource "google_secret_manager_secret_iam_member" "catalogue_db" {
+  project   = var.shared_project_id
+  secret_id = "db-app-password"
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.backend.email}"
+  member    = "serviceAccount:${google_service_account.catalogue_job.email}"
 }
 
 # =============================================================================
@@ -258,20 +239,44 @@ resource "google_cloud_run_v2_service" "backend" {
         startup_cpu_boost = true
       }
 
-      env { name = "BREATHE_ENV"; value = var.environment }
-      env { name = "DB_NAME"; value = var.db_name }
-      env { name = "DB_USER"; value = var.db_user }
-      env { name = "CLOUD_SQL_INSTANCE"; value = var.db_connection_name }
-      env { name = "GCS_PRODUCT_DATA_BUCKET"; value = google_storage_bucket.product_data.name }
-      env { name = "GCS_RAW_FEEDS_BUCKET"; value = google_storage_bucket.raw_feeds.name }
-      env { name = "GCS_IMAGES_BUCKET"; value = google_storage_bucket.images.name }
-      env { name = "AUTH_ISSUER"; value = var.auth_issuer_url }
+      env {
+        name  = "BREATHE_ENV"
+        value = var.environment
+      }
+      env {
+        name  = "DB_NAME"
+        value = var.db_name
+      }
+      env {
+        name  = "DB_USER"
+        value = var.db_user
+      }
+      env {
+        name  = "CLOUD_SQL_INSTANCE"
+        value = var.db_connection_name
+      }
+      env {
+        name  = "GCS_PRODUCT_DATA_BUCKET"
+        value = google_storage_bucket.product_data.name
+      }
+      env {
+        name  = "GCS_RAW_FEEDS_BUCKET"
+        value = google_storage_bucket.raw_feeds.name
+      }
+      env {
+        name  = "GCS_IMAGES_BUCKET"
+        value = google_storage_bucket.images.name
+      }
+      env {
+        name  = "AUTH_ISSUER"
+        value = var.auth_issuer_url
+      }
 
       env {
         name = "DB_PASSWORD"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.db_password.id
+            secret  = "projects/${var.shared_project_id}/secrets/db-app-password"
             version = "latest"
           }
         }
@@ -347,19 +352,40 @@ resource "google_cloud_run_v2_job" "catalogue" {
           }
         }
 
-        env { name = "JOB_TYPE"; value = "FEED_SYNC" }
-        env { name = "DB_NAME"; value = var.db_name }
-        env { name = "DB_USER"; value = var.db_user }
-        env { name = "CLOUD_SQL_INSTANCE"; value = var.db_connection_name }
-        env { name = "GCS_GENERATED_BUCKET"; value = google_storage_bucket.product_data.name }
-        env { name = "GCS_RAW_FEEDS_BUCKET"; value = google_storage_bucket.raw_feeds.name }
-        env { name = "GCS_IMAGES_BUCKET"; value = google_storage_bucket.images.name }
+        env {
+          name  = "JOB_TYPE"
+          value = "FEED_SYNC"
+        }
+        env {
+          name  = "DB_NAME"
+          value = var.db_name
+        }
+        env {
+          name  = "DB_USER"
+          value = var.db_user
+        }
+        env {
+          name  = "CLOUD_SQL_INSTANCE"
+          value = var.db_connection_name
+        }
+        env {
+          name  = "GCS_GENERATED_BUCKET"
+          value = google_storage_bucket.product_data.name
+        }
+        env {
+          name  = "GCS_RAW_FEEDS_BUCKET"
+          value = google_storage_bucket.raw_feeds.name
+        }
+        env {
+          name  = "GCS_IMAGES_BUCKET"
+          value = google_storage_bucket.images.name
+        }
 
         env {
           name = "DB_PASSWORD"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.db_password.id
+              secret  = "projects/${var.shared_project_id}/secrets/db-app-password"
               version = "latest"
             }
           }
