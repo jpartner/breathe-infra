@@ -241,7 +241,7 @@ resource "google_cloud_run_v2_service" "backend" {
 
       env {
         name  = "BREATHE_ENV"
-        value = var.environment
+        value = "BREATHE_WEST2_TEST"
       }
       env {
         name  = "DB_NAME"
