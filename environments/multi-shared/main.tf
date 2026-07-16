@@ -440,6 +440,37 @@ resource "google_project_iam_member" "test_runner_sql" {
   member  = "serviceAccount:${google_service_account.test_runner.email}"
 }
 
+# Test runner auth secrets
+resource "google_secret_manager_secret" "test_runner_auth_secret" {
+  project   = var.project_id
+  secret_id = "test-runner-auth-secret"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret" "test_runner_zitadel_secret" {
+  project   = var.project_id
+  secret_id = "test-runner-zitadel-secret"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_iam_member" "test_runner_auth" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.test_runner_auth_secret.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.test_runner.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "test_runner_zitadel" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.test_runner_zitadel_secret.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.test_runner.email}"
+}
+
 # Test runner needs to read the DB password
 resource "google_secret_manager_secret_iam_member" "test_runner_db" {
   project   = var.project_id
@@ -581,6 +612,38 @@ resource "google_cloud_run_v2_service" "test_runner" {
         value = google_storage_bucket.test_logs.name
       }
 
+      # Auth (NextAuth + Zitadel OIDC)
+      env {
+        name  = "AUTH_URL"
+        value = "https://test.breathebranding.co.uk"
+      }
+      env {
+        name = "AUTH_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.test_runner_auth_secret.id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name  = "ZITADEL_ISSUER"
+        value = "https://${var.zitadel_domain}"
+      }
+      env {
+        name  = "ZITADEL_CLIENT_ID"
+        value = zitadel_application_oidc.test_runner.client_id
+      }
+      env {
+        name = "ZITADEL_CLIENT_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.test_runner_zitadel_secret.id
+            version = "latest"
+          }
+        }
+      }
+
       startup_probe {
         tcp_socket {
           port = 3000
@@ -651,6 +714,10 @@ module "platform_lb" {
       cloud_run_service = "zitadel"
       region            = var.region
     }
+    test-runner = {
+      cloud_run_service = "breathe-test-runner"
+      region            = var.region
+    }
   }
 
   host_rules = {
@@ -658,11 +725,15 @@ module "platform_lb" {
       hosts   = [var.zitadel_domain]
       backend = "zitadel"
     }
+    test = {
+      hosts   = ["test.breathebranding.co.uk"]
+      backend = "test-runner"
+    }
   }
 
   default_backend = "zitadel"
 
-  domains = [var.zitadel_domain]
+  domains = [var.zitadel_domain, "test.breathebranding.co.uk"]
 
   depends_on = [module.zitadel]
 }

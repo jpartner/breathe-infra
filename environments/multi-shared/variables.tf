@@ -59,6 +59,13 @@ variable "zitadel_smtp_password" {
   default     = ""
 }
 
+# Zitadel default org (ZITADEL org, used for platform-level resources)
+variable "zitadel_default_org_id" {
+  description = "Default Zitadel organization ID for platform resources"
+  type        = string
+  default     = "381719479391980205"
+}
+
 # Database
 variable "db_tier" {
   description = "Cloud SQL machine tier"
