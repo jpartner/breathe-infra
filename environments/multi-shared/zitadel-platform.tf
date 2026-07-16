@@ -3,6 +3,22 @@
 # Lives in the default ZITADEL org.
 
 # =============================================================================
+# Google Identity Provider (instance-level, available to all orgs)
+# =============================================================================
+
+resource "zitadel_idp_google" "google" {
+  name                = "Google"
+  client_id           = var.google_oauth_client_id
+  client_secret       = var.google_oauth_client_secret
+  scopes              = ["openid", "profile", "email"]
+  is_linking_allowed  = true
+  is_creation_allowed = true
+  is_auto_creation    = true
+  is_auto_update      = true
+  auto_linking        = "AUTO_LINKING_OPTION_EMAIL"
+}
+
+# =============================================================================
 # Platform Tools Project
 # =============================================================================
 

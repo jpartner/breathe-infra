@@ -66,6 +66,20 @@ variable "zitadel_default_org_id" {
   default     = "381719479391980205"
 }
 
+# Google OAuth (for Zitadel Google IdP)
+variable "google_oauth_client_id" {
+  description = "Google OAuth client ID for Zitadel Google login"
+  type        = string
+  default     = "869820587346-cud6q2doompdsdif7ckvm40rkreu512a.apps.googleusercontent.com"
+}
+
+variable "google_oauth_client_secret" {
+  description = "Google OAuth client secret"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # Database
 variable "db_tier" {
   description = "Cloud SQL machine tier"
