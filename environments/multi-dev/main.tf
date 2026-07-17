@@ -460,7 +460,7 @@ resource "google_cloud_run_v2_job" "catalogue" {
 
       containers {
         image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/breathe-backend/breathe-backend:latest"
-        command = ["java", "-cp", "/app/classpath/*:/app/libs/*", "com.breathe.catalogue.job.CatalogueJobRunnerKt"]
+        command = ["/product-catalogue-0.0.1/bin/product-catalogue"]
 
         resources {
           limits = {
