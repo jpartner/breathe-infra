@@ -124,6 +124,58 @@ resource "google_storage_bucket" "images" {
   }
 }
 
+resource "google_storage_bucket" "baskets" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-baskets"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = true
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+}
+
+resource "google_storage_bucket" "artwork" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-artwork"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = true
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+}
+
+resource "google_storage_bucket" "uploaded_artwork" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-uploaded-artwork"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = true
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+}
+
+resource "google_storage_bucket" "cost_pricing" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-cost-pricing"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = true
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+}
+
 # =============================================================================
 # IAM — Backend service account
 # =============================================================================
@@ -143,6 +195,30 @@ resource "google_storage_bucket_iam_member" "backend_product_data" {
 resource "google_storage_bucket_iam_member" "backend_images" {
   bucket = google_storage_bucket.images.name
   role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.backend.email}"
+}
+
+resource "google_storage_bucket_iam_member" "backend_baskets" {
+  bucket = google_storage_bucket.baskets.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.backend.email}"
+}
+
+resource "google_storage_bucket_iam_member" "backend_artwork" {
+  bucket = google_storage_bucket.artwork.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.backend.email}"
+}
+
+resource "google_storage_bucket_iam_member" "backend_uploaded_artwork" {
+  bucket = google_storage_bucket.uploaded_artwork.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.backend.email}"
+}
+
+resource "google_storage_bucket_iam_member" "backend_cost_pricing" {
+  bucket = google_storage_bucket.cost_pricing.name
+  role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.backend.email}"
 }
 
@@ -243,6 +319,8 @@ resource "google_cloud_run_v2_service" "backend" {
         name  = "BREATHE_ENV"
         value = "BREATHE_WEST2_TEST"
       }
+
+      # Database
       env {
         name  = "DB_NAME"
         value = var.db_name
@@ -256,6 +334,23 @@ resource "google_cloud_run_v2_service" "backend" {
         value = var.db_connection_name
       }
       env {
+        name = "DB_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/db-app-password"
+            version = "latest"
+          }
+        }
+      }
+
+      # GCP project
+      env {
+        name  = "GCP_PROJECT"
+        value = var.project_id
+      }
+
+      # GCS Buckets
+      env {
         name  = "GCS_PRODUCT_DATA_BUCKET"
         value = google_storage_bucket.product_data.name
       }
@@ -268,18 +363,40 @@ resource "google_cloud_run_v2_service" "backend" {
         value = google_storage_bucket.images.name
       }
       env {
-        name  = "AUTH_ISSUER"
-        value = var.auth_issuer_url
+        name  = "GCS_BASKET_BUCKET"
+        value = google_storage_bucket.baskets.name
+      }
+      env {
+        name  = "GCS_ARTWORK_BUCKET"
+        value = google_storage_bucket.artwork.name
+      }
+      env {
+        name  = "GCS_UPLOADED_ARTWORK_BUCKET"
+        value = google_storage_bucket.uploaded_artwork.name
+      }
+      env {
+        name  = "GCS_COST_PRICING_BUCKET"
+        value = google_storage_bucket.cost_pricing.name
       }
 
+      # Service URLs (self-reference uses the known Cloud Run URL pattern)
       env {
-        name = "DB_PASSWORD"
-        value_source {
-          secret_key_ref {
-            secret  = "projects/${var.shared_project_id}/secrets/db-app-password"
-            version = "latest"
-          }
-        }
+        name  = "SERVICE_URL_ECOMMERCE"
+        value = "http://localhost:8080"
+      }
+      env {
+        name  = "SERVICE_URL_CUSTOMER"
+        value = "https://dev.breathebranding.co.uk"
+      }
+      env {
+        name  = "PDF_SERVICE_URL"
+        value = google_cloud_run_v2_service.pdf.uri
+      }
+
+      # Auth
+      env {
+        name  = "AUTH_ISSUER"
+        value = var.auth_issuer_url
       }
 
       startup_probe {
