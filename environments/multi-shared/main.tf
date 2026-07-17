@@ -644,6 +644,20 @@ resource "google_cloud_run_v2_service" "test_runner" {
         }
       }
 
+      # Test user PATs (for authenticated API tests)
+      env {
+        name  = "TEST_ADMIN_PAT"
+        value = var.test_admin_pat
+      }
+      env {
+        name  = "TEST_CUSTOMER_PAT"
+        value = var.test_customer_pat
+      }
+      env {
+        name  = "TEST_NOROLE_PAT"
+        value = var.test_norole_pat
+      }
+
       startup_probe {
         tcp_socket {
           port = 3000

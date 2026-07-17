@@ -80,6 +80,28 @@ variable "google_oauth_client_secret" {
   default     = ""
 }
 
+# Test user PATs (for authenticated API tests in test runner)
+variable "test_admin_pat" {
+  description = "PAT for e2e-test-admin machine user"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "test_customer_pat" {
+  description = "PAT for e2e-test-customer machine user"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "test_norole_pat" {
+  description = "PAT for e2e-test-norole machine user"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # Database
 variable "db_tier" {
   description = "Cloud SQL machine tier"
