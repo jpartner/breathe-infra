@@ -254,6 +254,14 @@ resource "google_storage_bucket_iam_member" "catalogue_images" {
 # Secrets — DB password is in breathe-shared, Stripe is per-environment
 # =============================================================================
 
+# Grant backend access to Zitadel service account key (for role lookups)
+resource "google_secret_manager_secret_iam_member" "backend_zitadel_sa" {
+  project   = var.shared_project_id
+  secret_id = "zitadel-service-account-key"
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # Grant backend access to shared DB password
 resource "google_secret_manager_secret_iam_member" "backend_db" {
   project   = var.shared_project_id
@@ -397,6 +405,15 @@ resource "google_cloud_run_v2_service" "backend" {
       env {
         name  = "AUTH_ISSUER"
         value = var.auth_issuer_url
+      }
+      env {
+        name = "ZITADEL_SERVICE_ACCOUNT_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/zitadel-service-account-key"
+            version = "latest"
+          }
+        }
       }
 
       startup_probe {
