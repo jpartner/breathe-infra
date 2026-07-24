@@ -13,3 +13,7 @@ output "raw_feeds_bucket" {
 output "images_bucket" {
   value = google_storage_bucket.images.name
 }
+
+output "lb_ip" {
+  value = module.dev_lb.ip_address
+}

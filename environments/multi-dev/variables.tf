@@ -45,3 +45,23 @@ variable "auth_issuer_url" {
   type        = string
   default     = ""
 }
+
+variable "zitadel_admin_client_id" {
+  description = "Zitadel OIDC client ID for admin app"
+  type        = string
+  default     = "383218689803110726"
+}
+
+# Cloudflare
+variable "cloudflare_api_token" {
+  description = "Cloudflare API token with Zone:DNS:Edit for breathebranding.co.uk"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "cloudflare_zone_id" {
+  description = "Cloudflare zone ID for breathebranding.co.uk"
+  type        = string
+  default     = "4dc7218313de868751814ec5055e7fd7"
+}

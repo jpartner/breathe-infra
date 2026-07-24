@@ -22,6 +22,10 @@ terraform {
       source  = "zitadel/zitadel"
       version = "~> 3.2"
     }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.0"
+    }
   }
 
   backend "gcs" {
@@ -38,6 +42,10 @@ provider "google" {
 provider "google-beta" {
   project = var.project_id
   region  = var.region
+}
+
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
 }
 
 # =============================================================================
@@ -751,3 +759,8 @@ module "platform_lb" {
 
   depends_on = [module.zitadel]
 }
+
+# =============================================================================
+# Cloudflare DNS — breathebranding.co.uk
+# =============================================================================
+

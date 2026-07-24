@@ -9,6 +9,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 5.0"
     }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.0"
+    }
   }
 
   backend "gcs" {
@@ -20,6 +24,10 @@ terraform {
 provider "google" {
   project = var.project_id
   region  = var.region
+}
+
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
 }
 
 # =============================================================================
@@ -278,6 +286,27 @@ resource "google_secret_manager_secret_iam_member" "catalogue_db" {
   member    = "serviceAccount:${google_service_account.catalogue_job.email}"
 }
 
+# Grant catalogue job access to supplier secrets
+resource "google_secret_manager_secret_iam_member" "catalogue_supplier_secrets" {
+  for_each = toset([
+    "typesense-api-key",
+    "preseli-secret-key",
+    "impression-europe-password",
+    "xoopar-password",
+    "outdoors-company-user-token",
+    "keramikos-password",
+    "umbrella-api-key",
+    "laltex-api-key",
+    "bic-graphic-client-secret",
+    "bic-graphic-password",
+  ])
+
+  project   = var.shared_project_id
+  secret_id = each.value
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.catalogue_job.email}"
+}
+
 # =============================================================================
 # Cloud Run — Backend (ecommerce API)
 # =============================================================================
@@ -482,7 +511,7 @@ resource "google_cloud_run_v2_job" "catalogue" {
         resources {
           limits = {
             cpu    = "2"
-            memory = "2Gi"
+            memory = "4Gi"
           }
         }
 
@@ -523,6 +552,200 @@ resource "google_cloud_run_v2_job" "catalogue" {
               version = "latest"
             }
           }
+        }
+
+        # Typesense
+        env {
+          name  = "TYPESENSE_COLLECTION"
+          value = "catalogue_dev"
+        }
+        env {
+          name = "TYPESENSE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/typesense-api-key"
+              version = "latest"
+            }
+          }
+        }
+
+        # SP001 PF Concept
+        env {
+          name  = "PF_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "PF_FEEDS_BUCKET"
+          value = google_storage_bucket.raw_feeds.name
+        }
+
+        # SP002 Preseli
+        env {
+          name  = "PRESELI_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "PRESELI_CLIENT_ID"
+          value = "MzM4Nw==7WIM3Vw5vrjJd64_CzmOb0BS8DtixNauRQXFeHnKyq"
+        }
+        env {
+          name = "PRESELI_SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/preseli-secret-key"
+              version = "latest"
+            }
+          }
+        }
+
+        # SP003 Impression Europe
+        env {
+          name  = "IMPRESSION_EUROPE_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "IMPRESSION_EUROPE_USERNAME"
+          value = "pa-promotions"
+        }
+        env {
+          name = "IMPRESSION_EUROPE_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/impression-europe-password"
+              version = "latest"
+            }
+          }
+        }
+
+        # SP005 Outdoors Company
+        env {
+          name  = "OUTDOORS_COMPANY_ENABLED"
+          value = "true"
+        }
+        env {
+          name = "OUTDOORS_COMPANY_USER_TOKEN"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/outdoors-company-user-token"
+              version = "latest"
+            }
+          }
+        }
+
+        # SP006 Xoopar
+        env {
+          name  = "XOOPAR_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "XOOPAR_USERNAME"
+          value = "PA_PROMOTIONS"
+        }
+        env {
+          name = "XOOPAR_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/xoopar-password"
+              version = "latest"
+            }
+          }
+        }
+
+        # SP007 Keramikos
+        env {
+          name  = "KERAMIKOS_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "KERAMIKOS_USERNAME"
+          value = "tom@pa-promotions.co.uk"
+        }
+        env {
+          name = "KERAMIKOS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/keramikos-password"
+              version = "latest"
+            }
+          }
+        }
+
+        # SP008 The Umbrella Company
+        env {
+          name  = "UMBRELLA_ENABLED"
+          value = "true"
+        }
+        env {
+          name = "UMBRELLA_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/umbrella-api-key"
+              version = "latest"
+            }
+          }
+        }
+
+        # SP004 BIC Graphic
+        env {
+          name  = "BIC_GRAPHIC_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "BIC_GRAPHIC_CLIENT_ID"
+          value = "5de810b5-f818-4496-888a-ed129a260bc0"
+        }
+        env {
+          name  = "BIC_GRAPHIC_USERNAME"
+          value = "tom@pa-promotions.co.uk"
+        }
+        env {
+          name = "BIC_GRAPHIC_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/bic-graphic-client-secret"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "BIC_GRAPHIC_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/bic-graphic-password"
+              version = "latest"
+            }
+          }
+        }
+
+        # Laltex Group (SP009-SP013)
+        env {
+          name = "LALTEX_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/laltex-api-key"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name  = "LALTEX_PRE_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "LALTEX_TPC_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "LALTEX_SRC_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "LALTEX_BHQ_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "LALTEX_FFP_ENABLED"
+          value = "true"
         }
       }
     }
@@ -617,6 +840,10 @@ resource "google_cloud_run_v2_service" "admin" {
       env {
         name  = "NUXT_PUBLIC_AUTH_ISSUER"
         value = var.auth_issuer_url
+      }
+      env {
+        name  = "NUXT_PUBLIC_AUTH_CLIENT_ID"
+        value = var.zitadel_admin_client_id
       }
 
       startup_probe {
@@ -726,4 +953,71 @@ resource "google_cloud_run_v2_service_iam_member" "pdf_public" {
   name     = google_cloud_run_v2_service.pdf.name
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+
+# =============================================================================
+# Load Balancer — routes custom domains to Cloud Run services
+# =============================================================================
+
+module "dev_lb" {
+  source = "../../modules/platform-lb"
+
+  project_id = var.project_id
+
+  backends = {
+    admin = {
+      cloud_run_service = google_cloud_run_v2_service.admin.name
+      region            = var.region
+    }
+    backend = {
+      cloud_run_service = google_cloud_run_v2_service.backend.name
+      region            = var.region
+    }
+    pdf = {
+      cloud_run_service = google_cloud_run_v2_service.pdf.name
+      region            = var.region
+    }
+  }
+
+  host_rules = {
+    admin = {
+      hosts   = ["admin.dev.breathebranding.co.uk"]
+      backend = "admin"
+    }
+    backend = {
+      hosts   = ["api.dev.breathebranding.co.uk"]
+      backend = "backend"
+    }
+    pdf = {
+      hosts   = ["pdf.dev.breathebranding.co.uk"]
+      backend = "pdf"
+    }
+  }
+
+  default_backend = "backend"
+
+  domains = [
+    "admin.dev.breathebranding.co.uk",
+    "api.dev.breathebranding.co.uk",
+    "pdf.dev.breathebranding.co.uk",
+  ]
+}
+
+# =============================================================================
+# Cloudflare DNS — dev environment domains
+# =============================================================================
+
+resource "cloudflare_record" "dev_services" {
+  for_each = {
+    "admin.dev" = "admin.dev"
+    "api.dev"   = "api.dev"
+    "pdf.dev"   = "pdf.dev"
+  }
+
+  zone_id = var.cloudflare_zone_id
+  name    = each.value
+  content = module.dev_lb.ip_address
+  type    = "A"
+  proxied = false  # DNS only — GCP managed SSL certs need direct resolution
+  ttl     = 300
 }

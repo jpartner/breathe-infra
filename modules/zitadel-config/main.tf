@@ -74,18 +74,18 @@ resource "zitadel_application_oidc" "admin" {
   name       = "Admin UI"
 
   redirect_uris = [
-    "https://${each.value.admin_domain}/api/auth/callback/zitadel",
-    "http://localhost:3000/api/auth/callback/zitadel",
+    "https://${each.value.admin_domain}",
+    "http://localhost:3001",
   ]
 
   post_logout_redirect_uris = [
     "https://${each.value.admin_domain}",
-    "http://localhost:3000",
+    "http://localhost:3001",
   ]
 
   response_types              = ["OIDC_RESPONSE_TYPE_CODE"]
   grant_types                 = ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"]
-  app_type                    = "OIDC_APP_TYPE_WEB"
+  app_type                    = "OIDC_APP_TYPE_USER_AGENT"
   auth_method_type            = "OIDC_AUTH_METHOD_TYPE_NONE"
   access_token_type           = "OIDC_TOKEN_TYPE_JWT"
   id_token_role_assertion     = true
