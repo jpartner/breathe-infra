@@ -299,6 +299,7 @@ resource "google_secret_manager_secret_iam_member" "catalogue_supplier_secrets" 
     "laltex-api-key",
     "bic-graphic-client-secret",
     "bic-graphic-password",
+    "crystal-galleries-api-key",
   ])
 
   project   = var.shared_project_id
@@ -554,6 +555,12 @@ resource "google_cloud_run_v2_job" "catalogue" {
           }
         }
 
+        # CDN for cached images
+        env {
+          name  = "CDN_BASE_URL"
+          value = "https://cdn.dev.breathebranding.co.uk"
+        }
+
         # Typesense
         env {
           name  = "TYPESENSE_COLLECTION"
@@ -746,6 +753,21 @@ resource "google_cloud_run_v2_job" "catalogue" {
         env {
           name  = "LALTEX_FFP_ENABLED"
           value = "true"
+        }
+
+        # SP014 Crystal Galleries
+        env {
+          name  = "CRYSTAL_GALLERIES_ENABLED"
+          value = "true"
+        }
+        env {
+          name = "CRYSTAL_GALLERIES_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/crystal-galleries-api-key"
+              version = "latest"
+            }
+          }
         }
       }
     }
@@ -956,6 +978,90 @@ resource "google_cloud_run_v2_service_iam_member" "pdf_public" {
 }
 
 # =============================================================================
+# Cloud Run — Nginx Reverse Proxy (serves product data + images from GCS)
+# =============================================================================
+
+resource "google_cloud_run_v2_service" "nginx" {
+  name     = "breathe-nginx"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
+  template {
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 5
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/breathe-nginx/breathe-nginx:latest"
+
+      ports { container_port = 80 }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      volume_mounts {
+        name       = "generated"
+        mount_path = "/generated"
+      }
+      volume_mounts {
+        name       = "images"
+        mount_path = "/images"
+      }
+    }
+
+    volumes {
+      name = "generated"
+      gcs {
+        bucket    = google_storage_bucket.product_data.name
+        read_only = true
+      }
+    }
+    volumes {
+      name = "images"
+      gcs {
+        bucket    = google_storage_bucket.images.name
+        read_only = true
+      }
+    }
+
+    timeout = "60s"
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "nginx_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.nginx.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# =============================================================================
 # Load Balancer — routes custom domains to Cloud Run services
 # =============================================================================
 
@@ -977,6 +1083,10 @@ module "dev_lb" {
       cloud_run_service = google_cloud_run_v2_service.pdf.name
       region            = var.region
     }
+    cdn = {
+      cloud_run_service = google_cloud_run_v2_service.nginx.name
+      region            = var.region
+    }
   }
 
   host_rules = {
@@ -992,6 +1102,10 @@ module "dev_lb" {
       hosts   = ["pdf.dev.breathebranding.co.uk"]
       backend = "pdf"
     }
+    cdn = {
+      hosts   = ["cdn.dev.breathebranding.co.uk"]
+      backend = "cdn"
+    }
   }
 
   default_backend = "backend"
@@ -1000,6 +1114,7 @@ module "dev_lb" {
     "admin.dev.breathebranding.co.uk",
     "api.dev.breathebranding.co.uk",
     "pdf.dev.breathebranding.co.uk",
+    "cdn.dev.breathebranding.co.uk",
   ]
 }
 
@@ -1012,6 +1127,7 @@ resource "cloudflare_record" "dev_services" {
     "admin.dev" = "admin.dev"
     "api.dev"   = "api.dev"
     "pdf.dev"   = "pdf.dev"
+    "cdn.dev"   = "cdn.dev"
   }
 
   zone_id = var.cloudflare_zone_id
