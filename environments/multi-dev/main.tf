@@ -270,6 +270,14 @@ resource "google_secret_manager_secret_iam_member" "backend_zitadel_sa" {
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
 
+# Grant backend access to Anthropic API key (LLM classification)
+resource "google_secret_manager_secret_iam_member" "backend_anthropic" {
+  project   = var.shared_project_id
+  secret_id = "anthropic-api-key"
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # Grant backend access to shared DB password
 resource "google_secret_manager_secret_iam_member" "backend_db" {
   project   = var.shared_project_id
@@ -429,6 +437,17 @@ resource "google_cloud_run_v2_service" "backend" {
       env {
         name  = "PDF_SERVICE_URL"
         value = google_cloud_run_v2_service.pdf.uri
+      }
+
+      # Anthropic API (LLM classification)
+      env {
+        name = "ANTHROPIC_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/anthropic-api-key"
+            version = "latest"
+          }
+        }
       }
 
       # Auth
@@ -789,12 +808,13 @@ resource "google_project_iam_member" "scheduler_invoker" {
 }
 
 resource "google_cloud_scheduler_job" "catalogue" {
-  name        = "catalogue-feed-sync"
-  project     = var.project_id
-  region      = var.region
-  description = "Runs catalogue feed processor"
-  schedule    = "0 */4 * * *" # Every 4 hours
-  time_zone   = "Europe/London"
+  name             = "catalogue-feed-sync"
+  project          = var.project_id
+  region           = var.region
+  description      = "Runs catalogue feed processor every 4 hours"
+  schedule         = "0 */4 * * *"
+  time_zone        = "Europe/London"
+  attempt_deadline = "1800s"
 
   http_target {
     uri         = "https://${var.region}-run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/jobs/catalogue-feed-processor:run"
@@ -898,12 +918,13 @@ resource "google_cloud_run_v2_job" "search_trim" {
 }
 
 resource "google_cloud_scheduler_job" "search_trim" {
-  name        = "catalogue-search-trim"
-  project     = var.project_id
-  region      = var.region
-  description = "Daily trim of stale products from search index"
-  schedule    = "30 2 * * *" # Daily at 02:30
-  time_zone   = "Europe/London"
+  name             = "catalogue-search-trim"
+  project          = var.project_id
+  region           = var.region
+  description      = "Daily trim of stale products from search index"
+  schedule         = "30 2 * * *"
+  time_zone        = "Europe/London"
+  attempt_deadline = "600s"
 
   http_target {
     uri         = "https://${var.region}-run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/jobs/catalogue-search-trim:run"
