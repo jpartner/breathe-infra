@@ -809,6 +809,115 @@ resource "google_cloud_scheduler_job" "catalogue" {
   depends_on = [google_cloud_run_v2_job.catalogue]
 }
 
+resource "google_cloud_run_v2_job" "search_trim" {
+  name     = "catalogue-search-trim"
+  project  = var.project_id
+  location = var.region
+
+  lifecycle {
+    ignore_changes = [
+      template[0].template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
+  template {
+    task_count  = 1
+    parallelism = 1
+
+    template {
+      service_account = google_service_account.catalogue_job.email
+      timeout         = "600s"
+      max_retries     = 0
+
+      vpc_access {
+        connector = var.vpc_connector_id
+        egress    = "PRIVATE_RANGES_ONLY"
+      }
+
+      containers {
+        image   = "${var.region}-docker.pkg.dev/${var.shared_project_id}/breathe-backend/breathe-backend:latest"
+        command = ["/product-catalogue-0.0.1/bin/product-catalogue"]
+
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "512Mi"
+          }
+        }
+
+        env {
+          name  = "JOB_TYPE"
+          value = "SEARCH_TRIM"
+        }
+        env {
+          name  = "DB_NAME"
+          value = var.db_name
+        }
+        env {
+          name  = "DB_USER"
+          value = var.db_user
+        }
+        env {
+          name  = "CLOUD_SQL_INSTANCE"
+          value = var.db_connection_name
+        }
+        env {
+          name  = "TYPESENSE_COLLECTION"
+          value = "catalogue_dev"
+        }
+        env {
+          name = "DB_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/db-app-password"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "TYPESENSE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/typesense-api-key"
+              version = "latest"
+            }
+          }
+        }
+      }
+    }
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_cloud_scheduler_job" "search_trim" {
+  name        = "catalogue-search-trim"
+  project     = var.project_id
+  region      = var.region
+  description = "Daily trim of stale products from search index"
+  schedule    = "30 2 * * *" # Daily at 02:30
+  time_zone   = "Europe/London"
+
+  http_target {
+    uri         = "https://${var.region}-run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/jobs/catalogue-search-trim:run"
+    http_method = "POST"
+
+    oauth_token {
+      service_account_email = google_service_account.scheduler.email
+      scope                 = "https://www.googleapis.com/auth/cloud-platform"
+    }
+  }
+
+  depends_on = [google_cloud_run_v2_job.search_trim]
+}
+
 # =============================================================================
 # Cloud Run — Admin UI
 # =============================================================================
