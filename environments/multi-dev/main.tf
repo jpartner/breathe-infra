@@ -270,6 +270,14 @@ resource "google_secret_manager_secret_iam_member" "backend_zitadel_sa" {
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
 
+# Grant backend access to Typesense API key (catalogue search proxy)
+resource "google_secret_manager_secret_iam_member" "backend_typesense" {
+  project   = var.shared_project_id
+  secret_id = "typesense-api-key"
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # Grant backend access to Anthropic API key (LLM classification)
 resource "google_secret_manager_secret_iam_member" "backend_anthropic" {
   project   = var.shared_project_id
@@ -437,6 +445,21 @@ resource "google_cloud_run_v2_service" "backend" {
       env {
         name  = "PDF_SERVICE_URL"
         value = google_cloud_run_v2_service.pdf.uri
+      }
+
+      # Typesense (catalogue search proxy)
+      env {
+        name  = "TYPESENSE_COLLECTION"
+        value = "catalogue_dev"
+      }
+      env {
+        name = "TYPESENSE_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/typesense-api-key"
+            version = "latest"
+          }
+        }
       }
 
       # Anthropic API (LLM classification)
