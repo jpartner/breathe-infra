@@ -1789,8 +1789,12 @@ resource "google_cloud_run_v2_service" "storefront_breathe" {
       }
 
       env {
-        name  = "NEXT_PUBLIC_API_URL"
+        name  = "API_URL"
         value = "https://api.dev.unifeed.io"
+      }
+      env {
+        name  = "TENANT_CODE"
+        value = "breathe"
       }
     }
 
@@ -1847,8 +1851,12 @@ resource "google_cloud_run_v2_service" "storefront_breathe_eu" {
       }
 
       env {
-        name  = "NEXT_PUBLIC_API_URL"
+        name  = "API_URL"
         value = "https://api.dev.unifeed.io"
+      }
+      env {
+        name  = "TENANT_CODE"
+        value = "breathe-eu"
       }
     }
 
@@ -1905,8 +1913,12 @@ resource "google_cloud_run_v2_service" "storefront_pa" {
       }
 
       env {
-        name  = "NEXT_PUBLIC_API_URL"
+        name  = "API_URL"
         value = "https://api.dev.unifeed.io"
+      }
+      env {
+        name  = "TENANT_CODE"
+        value = "pa"
       }
     }
 
