@@ -45,6 +45,7 @@ resource "google_project_service" "apis" {
     "secretmanager.googleapis.com",
     "storage.googleapis.com",
     "cloudscheduler.googleapis.com",
+    "cloudtasks.googleapis.com",
     "iam.googleapis.com",
     "sqladmin.googleapis.com",
   ])
@@ -553,7 +554,7 @@ resource "google_cloud_run_v2_job" "catalogue" {
       }
 
       containers {
-        image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/breathe-backend/breathe-backend:latest"
+        image   = "${var.region}-docker.pkg.dev/${var.shared_project_id}/breathe-backend/breathe-backend:latest"
         command = ["/product-catalogue-0.0.1/bin/product-catalogue"]
 
         resources {
@@ -2124,12 +2125,12 @@ module "dev_lb" {
 
 resource "cloudflare_record" "dev_services" {
   for_each = {
-    "admin.dev"    = "admin.dev"
-    "api.dev"      = "api.dev"
-    "pdf.dev"      = "pdf.dev"
-    "cdn.dev"      = "cdn.dev"
-    "pa.dev"       = "pa.dev"
-    "shop.dev"     = "shop.dev"
+    "admin.dev" = "admin.dev"
+    "api.dev"   = "api.dev"
+    "pdf.dev"   = "pdf.dev"
+    "cdn.dev"   = "cdn.dev"
+    "pa.dev"    = "pa.dev"
+    "shop.dev"  = "shop.dev"
   }
 
   zone_id = var.cloudflare_zone_id
@@ -2168,4 +2169,39 @@ resource "cloudflare_record" "dev_breathe_eu" {
   type    = "A"
   proxied = false
   ttl     = 300
+}
+
+# =============================================================================
+# Cloud Tasks — email retry queue
+# =============================================================================
+
+resource "google_cloud_tasks_queue" "email_retry" {
+  name     = "email-retry"
+  location = var.region
+  project  = var.project_id
+
+  retry_config {
+    max_attempts  = 5
+    min_backoff   = "300s"   # 5 minutes
+    max_backoff   = "14400s" # 4 hours
+    max_doublings = 3        # 5m → 10m → 20m → 40m → then linear to 4h
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+# Allow the backend SA to enqueue tasks
+resource "google_project_iam_member" "backend_cloud_tasks_enqueuer" {
+  project = var.project_id
+  role    = "roles/cloudtasks.enqueuer"
+  member  = "serviceAccount:${google_service_account.backend.email}"
+}
+
+# Allow Cloud Tasks to invoke the unifeed backend (OIDC auth for retry endpoint)
+resource "google_cloud_run_v2_service_iam_member" "cloud_tasks_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.unifeed_backend.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.backend.email}"
 }
