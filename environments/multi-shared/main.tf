@@ -953,15 +953,15 @@ resource "google_cloud_run_v2_service" "unifeed_test_runner" {
       image = "${var.region}-docker.pkg.dev/${var.project_id}/unifeed-test/unifeed-test:latest"
 
       ports {
-        container_port = 8080
+        container_port = 3000
       }
 
       resources {
         limits = {
           cpu    = "2"
-          memory = "2Gi"
+          memory = "4Gi"
         }
-        cpu_idle          = true
+        cpu_idle          = false
         startup_cpu_boost = true
       }
 
@@ -970,8 +970,12 @@ resource "google_cloud_run_v2_service" "unifeed_test_runner" {
         value = "https://api.dev.unifeed.io"
       }
       env {
+        name  = "UNITEN_URL"
+        value = "https://uniten.dev.unifeed.io"
+      }
+      env {
         name  = "TEST_TENANT"
-        value = "breathe"
+        value = "uniten"
       }
     }
 
