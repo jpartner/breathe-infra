@@ -30,6 +30,11 @@ provider "cloudflare" {
   api_token = var.cloudflare_api_token
 }
 
+provider "cloudflare" {
+  alias     = "unifeed"
+  api_token = var.unifeed_cloudflare_api_token
+}
+
 # =============================================================================
 # APIs
 # =============================================================================
@@ -600,7 +605,7 @@ resource "google_cloud_run_v2_job" "catalogue" {
         # CDN for cached images
         env {
           name  = "CDN_BASE_URL"
-          value = "https://cdn.dev.breathebranding.co.uk"
+          value = "https://cdn.dev.unifeed.io/uk"
         }
 
         # Typesense
@@ -1215,6 +1220,782 @@ resource "google_cloud_run_v2_service_iam_member" "nginx_public" {
 }
 
 # =============================================================================
+# PA Migration — read-only legacy data lookup service
+# =============================================================================
+
+resource "google_service_account" "pa_migration" {
+  project      = var.project_id
+  account_id   = "sa-pa-migration"
+  display_name = "PA Migration Service Account"
+  description  = "Service account for PA legacy lookup Cloud Run service"
+}
+
+resource "google_secret_manager_secret_iam_member" "pa_migration_api_key" {
+  project   = var.shared_project_id
+  secret_id = "pa-migration-api-key"
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.pa_migration.email}"
+}
+
+resource "google_cloud_run_v2_service" "pa_migration" {
+  name     = "pa-migration"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
+  template {
+    service_account = google_service_account.pa_migration.email
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/pa-migration/pa-migration:latest"
+
+      ports { container_port = 8080 }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      env {
+        name = "PA_LEGACY_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/pa-migration-api-key"
+            version = "latest"
+          }
+        }
+      }
+
+      startup_probe {
+        http_get {
+          path = "/health"
+          port = 8080
+        }
+        initial_delay_seconds = 2
+        timeout_seconds       = 3
+        period_seconds        = 5
+        failure_threshold     = 5
+      }
+    }
+
+    timeout = "60s"
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "pa_migration_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.pa_migration.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# =============================================================================
+# Unifeed Backend
+# =============================================================================
+
+resource "google_cloud_run_v2_service" "unifeed_backend" {
+  name     = "unifeed-backend"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
+  template {
+    service_account = google_service_account.backend.email
+
+    vpc_access {
+      connector = var.vpc_connector_id
+      egress    = "PRIVATE_RANGES_ONLY"
+    }
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 3
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/unifeed-backend/unifeed-backend:latest"
+
+      ports { container_port = 8080 }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "1Gi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      env {
+        name  = "DB_URL"
+        value = "jdbc:postgresql://${var.db_host}:5432/unifeed_dev"
+      }
+      env {
+        name  = "DB_USER"
+        value = var.db_user
+      }
+      env {
+        name = "DB_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/db-app-password"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name  = "TYPESENSE_HOST"
+        value = var.typesense_host
+      }
+      env {
+        name = "TYPESENSE_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/typesense-api-key"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name  = "TYPESENSE_COLLECTION"
+        value = "catalogue_uk"
+      }
+
+      startup_probe {
+        http_get {
+          path = "/health"
+          port = 8080
+        }
+        initial_delay_seconds = 10
+        timeout_seconds       = 5
+        period_seconds        = 10
+        failure_threshold     = 20
+      }
+    }
+
+    timeout = "300s"
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "unifeed_backend_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.unifeed_backend.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# =============================================================================
+# Unifeed Catalogue Feed Sync Job
+# =============================================================================
+
+resource "google_cloud_run_v2_job" "unifeed_catalogue_sync" {
+  name     = "unifeed-catalogue-sync"
+  project  = var.project_id
+  location = var.region
+
+  lifecycle {
+    ignore_changes = [
+      template[0].template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
+  template {
+    task_count  = 1
+    parallelism = 1
+
+    template {
+      service_account = google_service_account.backend.email
+      timeout         = "3600s"
+      max_retries     = 1
+
+      vpc_access {
+        connector = var.vpc_connector_id
+        egress    = "PRIVATE_RANGES_ONLY"
+      }
+
+      containers {
+        image   = "${var.region}-docker.pkg.dev/${var.shared_project_id}/unifeed-backend/unifeed-backend:latest"
+        command = ["java", "-jar", "app.jar", "--spring.profiles.active=job"]
+
+        resources {
+          limits = {
+            cpu    = "2"
+            memory = "2Gi"
+          }
+        }
+
+        # Job config
+        env {
+          name  = "JOB_TYPE"
+          value = "FEED_SYNC"
+        }
+        env {
+          name  = "CATALOGUE_CODE"
+          value = "uk"
+        }
+        env {
+          name  = "TRIGGERED_BY"
+          value = "schedule"
+        }
+
+        # Database
+        env {
+          name  = "DB_URL"
+          value = "jdbc:postgresql://${var.db_host}:5432/unifeed_dev"
+        }
+        env {
+          name  = "DB_USER"
+          value = var.db_user
+        }
+        env {
+          name = "DB_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/db-app-password"
+              version = "latest"
+            }
+          }
+        }
+
+        # Typesense
+        env {
+          name  = "TYPESENSE_HOST"
+          value = var.typesense_host
+        }
+        env {
+          name  = "TYPESENSE_COLLECTION"
+          value = "catalogue_uk"
+        }
+        env {
+          name = "TYPESENSE_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/typesense-api-key"
+              version = "latest"
+            }
+          }
+        }
+
+        # GCS buckets
+        env {
+          name  = "GCS_PRODUCT_DATA_BUCKET"
+          value = "unifeed-catalogue-uk-dev"
+        }
+        env {
+          name  = "GCS_RAW_FEED_BUCKET"
+          value = "unifeed-catalogue-uk-dev"
+        }
+        env {
+          name  = "GCS_IMAGES_BUCKET"
+          value = "unifeed-catalogue-uk-dev"
+        }
+        env {
+          name  = "CDN_BASE_URL"
+          value = "https://cdn.dev.unifeed.io/uk"
+        }
+
+        # PF Concept (SP001)
+        env {
+          name  = "PF_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "PF_FEEDS_BUCKET"
+          value = "unifeed-catalogue-uk-dev"
+        }
+
+        # Preseli (SP002)
+        env {
+          name  = "PRESELI_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "PRESELI_CLIENT_ID"
+          value = "MzM4Nw==7WIM3Vw5vrjJd64_CzmOb0BS8DtixNauRQXFeHnKyq"
+        }
+        env {
+          name = "PRESELI_SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/preseli-secret-key"
+              version = "latest"
+            }
+          }
+        }
+
+        # Impression Europe (SP003)
+        env {
+          name  = "IMPRESSION_EUROPE_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "IMPRESSION_EUROPE_USERNAME"
+          value = "pa-promotions"
+        }
+        env {
+          name = "IMPRESSION_EUROPE_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/impression-europe-password"
+              version = "latest"
+            }
+          }
+        }
+
+        # Outdoors (SP005)
+        env {
+          name  = "OUTDOORS_COMPANY_ENABLED"
+          value = "true"
+        }
+        env {
+          name = "OUTDOORS_COMPANY_USER_TOKEN"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/outdoors-company-user-token"
+              version = "latest"
+            }
+          }
+        }
+
+        # Xoopar (SP006)
+        env {
+          name  = "XOOPAR_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "XOOPAR_USERNAME"
+          value = "PA_PROMOTIONS"
+        }
+        env {
+          name = "XOOPAR_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/xoopar-password"
+              version = "latest"
+            }
+          }
+        }
+
+        # Keramikos (SP007)
+        env {
+          name  = "KERAMIKOS_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "KERAMIKOS_USERNAME"
+          value = "tom@pa-promotions.co.uk"
+        }
+        env {
+          name = "KERAMIKOS_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/keramikos-password"
+              version = "latest"
+            }
+          }
+        }
+
+        # Umbrella (SP008)
+        env {
+          name  = "UMBRELLA_ENABLED"
+          value = "true"
+        }
+        env {
+          name = "UMBRELLA_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/umbrella-api-key"
+              version = "latest"
+            }
+          }
+        }
+
+        # BIC Graphic (SP004)
+        env {
+          name  = "BIC_GRAPHIC_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "BIC_GRAPHIC_CLIENT_ID"
+          value = "5de810b5-f818-4496-888a-ed129a260bc0"
+        }
+        env {
+          name  = "BIC_GRAPHIC_USERNAME"
+          value = "tom@pa-promotions.co.uk"
+        }
+        env {
+          name = "BIC_GRAPHIC_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/bic-graphic-client-secret"
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "BIC_GRAPHIC_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/bic-graphic-password"
+              version = "latest"
+            }
+          }
+        }
+
+        # Laltex (SP009-SP013)
+        env {
+          name = "LALTEX_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/laltex-api-key"
+              version = "latest"
+            }
+          }
+        }
+
+        # Crystal Galleries (SP014)
+        env {
+          name = "CRYSTAL_GALLERIES_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/crystal-galleries-api-key"
+              version = "latest"
+            }
+          }
+        }
+
+        # Midocean (SP015)
+        env {
+          name = "MIDOCEAN_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/midocean-api-key"
+              version = "latest"
+            }
+          }
+        }
+
+        # USB Group (SP017)
+        env {
+          name = "USB_GROUP_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/usbgroup-api-key"
+              version = "latest"
+            }
+          }
+        }
+
+        # Pinpoint (SP018)
+        env {
+          name = "PINPOINT_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/pinpoint-api-key"
+              version = "latest"
+            }
+          }
+        }
+      }
+    }
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+# =============================================================================
+# Unifeed Storefronts — one image, three services
+# =============================================================================
+
+resource "google_cloud_run_v2_service" "storefront_breathe" {
+  name     = "storefront-breathe"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
+  template {
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/unifeed-storefront/unifeed-storefront:latest"
+      ports { container_port = 3000 }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      env {
+        name  = "NEXT_PUBLIC_API_URL"
+        value = "https://api.dev.unifeed.io"
+      }
+    }
+
+    timeout = "60s"
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "storefront_breathe_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.storefront_breathe.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+resource "google_cloud_run_v2_service" "storefront_breathe_eu" {
+  name     = "storefront-breathe-eu"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
+  template {
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/unifeed-storefront/unifeed-storefront:latest"
+      ports { container_port = 3000 }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      env {
+        name  = "NEXT_PUBLIC_API_URL"
+        value = "https://api.dev.unifeed.io"
+      }
+    }
+
+    timeout = "60s"
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "storefront_breathe_eu_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.storefront_breathe_eu.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+resource "google_cloud_run_v2_service" "storefront_pa" {
+  name     = "storefront-pa"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
+  template {
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/unifeed-storefront/unifeed-storefront:latest"
+      ports { container_port = 3000 }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      env {
+        name  = "NEXT_PUBLIC_API_URL"
+        value = "https://api.dev.unifeed.io"
+      }
+    }
+
+    timeout = "60s"
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "storefront_pa_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.storefront_pa.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# =============================================================================
+# Uniten — test tenant storefront for automated testing
+# =============================================================================
+
+resource "google_cloud_run_v2_service" "storefront_uniten" {
+  name     = "storefront-uniten"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
+  template {
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 1
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/unifeed-storefront/uniten:latest"
+      ports { container_port = 3000 }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      env {
+        name  = "API_URL"
+        value = "https://api.dev.unifeed.io"
+      }
+      env {
+        name  = "TENANT_CODE"
+        value = "uniten"
+      }
+    }
+
+    timeout = "60s"
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "storefront_uniten_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.storefront_uniten.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# =============================================================================
 # Load Balancer — routes custom domains to Cloud Run services
 # =============================================================================
 
@@ -1240,6 +2021,30 @@ module "dev_lb" {
       cloud_run_service = google_cloud_run_v2_service.nginx.name
       region            = var.region
     }
+    pa = {
+      cloud_run_service = google_cloud_run_v2_service.pa_migration.name
+      region            = var.region
+    }
+    unifeed-api = {
+      cloud_run_service = google_cloud_run_v2_service.unifeed_backend.name
+      region            = var.region
+    }
+    storefront-breathe = {
+      cloud_run_service = google_cloud_run_v2_service.storefront_breathe.name
+      region            = var.region
+    }
+    storefront-breathe-eu = {
+      cloud_run_service = google_cloud_run_v2_service.storefront_breathe_eu.name
+      region            = var.region
+    }
+    storefront-pa = {
+      cloud_run_service = google_cloud_run_v2_service.storefront_pa.name
+      region            = var.region
+    }
+    storefront-uniten = {
+      cloud_run_service = google_cloud_run_v2_service.storefront_uniten.name
+      region            = var.region
+    }
   }
 
   host_rules = {
@@ -1259,6 +2064,30 @@ module "dev_lb" {
       hosts   = ["cdn.dev.breathebranding.co.uk"]
       backend = "cdn"
     }
+    pa = {
+      hosts   = ["pa.dev.breathebranding.co.uk"]
+      backend = "pa"
+    }
+    unifeed-api = {
+      hosts   = ["api.dev.unifeed.io"]
+      backend = "unifeed-api"
+    }
+    storefront-breathe = {
+      hosts   = ["shop.dev.breathebranding.co.uk"]
+      backend = "storefront-breathe"
+    }
+    storefront-breathe-eu = {
+      hosts   = ["dev.breathebranding.eu"]
+      backend = "storefront-breathe-eu"
+    }
+    storefront-pa = {
+      hosts   = ["pa.dev.unifeed.io"]
+      backend = "storefront-pa"
+    }
+    storefront-uniten = {
+      hosts   = ["uniten.dev.unifeed.io"]
+      backend = "storefront-uniten"
+    }
   }
 
   default_backend = "backend"
@@ -1268,6 +2097,12 @@ module "dev_lb" {
     "api.dev.breathebranding.co.uk",
     "pdf.dev.breathebranding.co.uk",
     "cdn.dev.breathebranding.co.uk",
+    "pa.dev.breathebranding.co.uk",
+    "api.dev.unifeed.io",
+    "shop.dev.breathebranding.co.uk",
+    "dev.breathebranding.eu",
+    "pa.dev.unifeed.io",
+    "uniten.dev.unifeed.io",
   ]
 }
 
@@ -1277,16 +2112,48 @@ module "dev_lb" {
 
 resource "cloudflare_record" "dev_services" {
   for_each = {
-    "admin.dev" = "admin.dev"
-    "api.dev"   = "api.dev"
-    "pdf.dev"   = "pdf.dev"
-    "cdn.dev"   = "cdn.dev"
+    "admin.dev"    = "admin.dev"
+    "api.dev"      = "api.dev"
+    "pdf.dev"      = "pdf.dev"
+    "cdn.dev"      = "cdn.dev"
+    "pa.dev"       = "pa.dev"
+    "shop.dev"     = "shop.dev"
   }
 
   zone_id = var.cloudflare_zone_id
   name    = each.value
   content = module.dev_lb.ip_address
   type    = "A"
-  proxied = false  # DNS only — GCP managed SSL certs need direct resolution
+  proxied = false
+  ttl     = 300
+}
+
+# Unifeed DNS — api.dev.unifeed.io, pa.dev.unifeed.io
+resource "cloudflare_record" "dev_unifeed" {
+  provider = cloudflare.unifeed
+
+  for_each = {
+    "api.dev"    = "api.dev"
+    "pa.dev"     = "pa.dev"
+    "uniten.dev" = "uniten.dev"
+  }
+
+  zone_id = var.unifeed_cloudflare_zone_id
+  name    = each.value
+  content = module.dev_lb.ip_address
+  type    = "A"
+  proxied = false
+  ttl     = 300
+}
+
+# breathebranding.eu DNS — dev.breathebranding.eu
+resource "cloudflare_record" "dev_breathe_eu" {
+  provider = cloudflare.unifeed
+
+  zone_id = var.breathe_eu_cloudflare_zone_id
+  name    = "dev"
+  content = module.dev_lb.ip_address
+  type    = "A"
+  proxied = false
   ttl     = 300
 }
