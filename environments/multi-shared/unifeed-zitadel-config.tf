@@ -21,7 +21,7 @@ module "unifeed_zitadel_config" {
     unifeed = {
       display_name = "Unifeed"
       domains = {
-        dev     = ["dev.unifeed.io"]
+        dev     = ["dev.unifeed.io", "uniten.dev.unifeed.io"]
         staging = ["staging.unifeed.io"]
         prod    = ["unifeed.io", "www.unifeed.io"]
       }
