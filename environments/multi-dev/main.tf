@@ -468,10 +468,6 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
         value = var.unifeed_zitadel_issuer
       }
       env {
-        name  = "ZITADEL_INTERNAL_URL"
-        value = "https://unifeed-zitadel-tdy3sc4miq-nw.a.run.app"
-      }
-      env {
         name = "WORKER_API_KEY"
         value_source {
           secret_key_ref {
