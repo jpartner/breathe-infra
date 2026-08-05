@@ -1442,7 +1442,7 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
       }
       env {
         name  = "UNIFEED_NOTIFICATIONS_POSTMARK_DEFAULT_ADMIN_EMAIL"
-        value = "orders@breathebranding.co.uk"
+        value = "dev@breathebranding.co.uk"
       }
 
       startup_probe {
