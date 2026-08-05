@@ -133,6 +133,14 @@ variable "test_norole_pat" {
   default     = ""
 }
 
+# Unifeed test users
+variable "unifeed_test_user_password" {
+  description = "Password for the e2e-test-login human user in Unifeed Zitadel"
+  type        = string
+  sensitive   = true
+  default     = "E2eTest!Unifeed2026"
+}
+
 # Cloudflare
 variable "cloudflare_api_token" {
   description = "Cloudflare API token with Zone:DNS:Edit for breathebranding.co.uk"

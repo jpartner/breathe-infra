@@ -25,3 +25,9 @@ output "zitadel_url" {
 output "platform_lb_ip" {
   value = module.platform_lb.ip_address
 }
+
+output "unifeed_customer_client_ids" {
+  description = "Zitadel customer OIDC client IDs per tenant-env"
+  value       = var.unifeed_zitadel_manage_config ? module.unifeed_zitadel_config[0].customer_client_ids : {}
+  sensitive   = true
+}

@@ -626,6 +626,25 @@ resource "google_secret_manager_secret_iam_member" "test_runner_zitadel" {
   member    = "serviceAccount:${google_service_account.test_runner.email}"
 }
 
+# Test runner needs to read test user PATs and login password
+resource "google_secret_manager_secret_iam_member" "test_runner_pats" {
+  for_each  = var.unifeed_zitadel_manage_config ? toset(["admin", "customer", "norole"]) : toset([])
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.test_pats[each.key].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.test_runner.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "test_runner_login_password" {
+  count     = var.unifeed_zitadel_manage_config ? 1 : 0
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.test_login_password[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.test_runner.email}"
+}
+
 # Test runner needs to read the DB password
 resource "google_secret_manager_secret_iam_member" "test_runner_db" {
   project   = var.project_id
@@ -942,6 +961,63 @@ resource "google_cloud_run_v2_service" "unifeed_test_runner" {
           }
         }
       }
+
+      # Test user PATs (for authenticated API tests)
+      dynamic "env" {
+        for_each = var.unifeed_zitadel_manage_config ? [1] : []
+        content {
+          name = "TEST_ADMIN_PAT"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.test_pats["admin"].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.unifeed_zitadel_manage_config ? [1] : []
+        content {
+          name = "TEST_CUSTOMER_PAT"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.test_pats["customer"].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.unifeed_zitadel_manage_config ? [1] : []
+        content {
+          name = "TEST_NOROLE_PAT"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.test_pats["norole"].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.unifeed_zitadel_manage_config ? [1] : []
+        content {
+          name  = "TEST_LOGIN_EMAIL"
+          value = "e2e-test@unifeed.io"
+        }
+      }
+      dynamic "env" {
+        for_each = var.unifeed_zitadel_manage_config ? [1] : []
+        content {
+          name = "TEST_LOGIN_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.test_login_password[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
     }
 
     vpc_access {
@@ -1009,7 +1085,7 @@ resource "google_cloud_run_v2_service" "unifeed_ingest" {
       }
       env {
         name  = "ZITADEL_ISSUER"
-        value = "https://${var.zitadel_domain}"
+        value = "https://${var.unifeed_zitadel_domain}"
       }
       env {
         name  = "ZITADEL_CLIENT_ID"

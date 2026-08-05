@@ -52,6 +52,24 @@ variable "zitadel_admin_client_id" {
   default     = "383218689803110726"
 }
 
+variable "unifeed_zitadel_issuer" {
+  description = "Unifeed Zitadel OIDC issuer URL"
+  type        = string
+  default     = "https://auth.unifeed.io"
+}
+
+variable "storefront_breathe_client_id" {
+  description = "Zitadel customer OIDC client ID for Breathe storefront (dev)"
+  type        = string
+  default     = "384307380713795084"
+}
+
+variable "storefront_pa_client_id" {
+  description = "Zitadel customer OIDC client ID for PA storefront (dev)"
+  type        = string
+  default     = "384307382844501516"
+}
+
 # Cloudflare
 variable "cloudflare_api_token" {
   description = "Cloudflare API token with Zone:DNS:Edit for breathebranding.co.uk"

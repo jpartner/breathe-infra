@@ -86,6 +86,29 @@ resource "google_service_account" "scheduler" {
   display_name = "Cloud Scheduler"
 }
 
+resource "google_service_account" "storefront" {
+  project      = var.project_id
+  account_id   = "sa-storefront"
+  display_name = "Storefront Service Account"
+  description  = "Service account for customer-facing storefront Cloud Run services"
+}
+
+# Storefront needs Secret Manager access for Zitadel client secrets and auth secrets
+resource "google_secret_manager_secret_iam_member" "storefront_secrets" {
+  for_each = toset([
+    "storefront-breathe-dev-zitadel-client-secret",
+    "storefront-pa-dev-zitadel-client-secret",
+    "storefront-breathe-auth-secret",
+    "storefront-breathe-eu-auth-secret",
+    "storefront-pa-auth-secret",
+  ])
+
+  project   = var.shared_project_id
+  secret_id = each.value
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.storefront.email}"
+}
+
 # =============================================================================
 # GCS Buckets
 # =============================================================================
@@ -1394,6 +1417,10 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
         name  = "TYPESENSE_COLLECTION"
         value = "catalogue_uk"
       }
+      env {
+        name  = "ZITADEL_ISSUER"
+        value = var.unifeed_zitadel_issuer
+      }
 
       startup_probe {
         http_get {
@@ -1771,6 +1798,8 @@ resource "google_cloud_run_v2_service" "storefront_breathe" {
   }
 
   template {
+    service_account = google_service_account.storefront.email
+
     scaling {
       min_instance_count = 0
       max_instance_count = 2
@@ -1796,6 +1825,32 @@ resource "google_cloud_run_v2_service" "storefront_breathe" {
       env {
         name  = "TENANT_CODE"
         value = "breathe"
+      }
+      env {
+        name  = "AUTH_ZITADEL_ISSUER"
+        value = var.unifeed_zitadel_issuer
+      }
+      env {
+        name  = "AUTH_ZITADEL_ID"
+        value = var.storefront_breathe_client_id
+      }
+      env {
+        name = "AUTH_ZITADEL_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/storefront-breathe-dev-zitadel-client-secret"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "AUTH_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/storefront-breathe-auth-secret"
+            version = "latest"
+          }
+        }
       }
     }
 
@@ -1833,6 +1888,8 @@ resource "google_cloud_run_v2_service" "storefront_breathe_eu" {
   }
 
   template {
+    service_account = google_service_account.storefront.email
+
     scaling {
       min_instance_count = 0
       max_instance_count = 2
@@ -1858,6 +1915,32 @@ resource "google_cloud_run_v2_service" "storefront_breathe_eu" {
       env {
         name  = "TENANT_CODE"
         value = "breathe-eu"
+      }
+      env {
+        name  = "AUTH_ZITADEL_ISSUER"
+        value = var.unifeed_zitadel_issuer
+      }
+      env {
+        name  = "AUTH_ZITADEL_ID"
+        value = var.storefront_breathe_client_id
+      }
+      env {
+        name = "AUTH_ZITADEL_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/storefront-breathe-dev-zitadel-client-secret"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "AUTH_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/storefront-breathe-eu-auth-secret"
+            version = "latest"
+          }
+        }
       }
     }
 
@@ -1895,6 +1978,8 @@ resource "google_cloud_run_v2_service" "storefront_pa" {
   }
 
   template {
+    service_account = google_service_account.storefront.email
+
     scaling {
       min_instance_count = 0
       max_instance_count = 2
@@ -1920,6 +2005,32 @@ resource "google_cloud_run_v2_service" "storefront_pa" {
       env {
         name  = "TENANT_CODE"
         value = "pa"
+      }
+      env {
+        name  = "AUTH_ZITADEL_ISSUER"
+        value = var.unifeed_zitadel_issuer
+      }
+      env {
+        name  = "AUTH_ZITADEL_ID"
+        value = var.storefront_pa_client_id
+      }
+      env {
+        name = "AUTH_ZITADEL_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/storefront-pa-dev-zitadel-client-secret"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "AUTH_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/storefront-pa-auth-secret"
+            version = "latest"
+          }
+        }
       }
     }
 

@@ -17,3 +17,9 @@ output "customer_client_ids" {
   description = "Map of tenant-env key to Customer App OIDC client ID"
   value       = { for k, app in zitadel_application_oidc.customer : k => app.client_id }
 }
+
+output "customer_client_secrets" {
+  description = "Map of tenant-env key to Customer App OIDC client secret"
+  value       = { for k, app in zitadel_application_oidc.customer : k => app.client_secret }
+  sensitive   = true
+}
