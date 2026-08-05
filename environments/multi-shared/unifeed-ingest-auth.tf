@@ -1,9 +1,14 @@
 # Ingest tool — Zitadel OIDC app on auth.unifeed.io
 # Single shared instance, not per-tenant.
 
+locals {
+  unifeed_org_id = "384307974325186060"
+}
+
 resource "zitadel_project" "ingest" {
   provider = zitadel.unifeed
 
+  org_id                 = local.unifeed_org_id
   name                   = "Ingest Tools"
   project_role_assertion = true
 }
@@ -11,6 +16,7 @@ resource "zitadel_project" "ingest" {
 resource "zitadel_application_oidc" "ingest" {
   provider = zitadel.unifeed
 
+  org_id     = local.unifeed_org_id
   project_id = zitadel_project.ingest.id
   name       = "Ingest"
 
