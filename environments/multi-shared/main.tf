@@ -251,7 +251,7 @@ resource "google_secret_manager_secret" "postmark_api_key" {
 # =============================================================================
 
 resource "google_artifact_registry_repository" "images" {
-  for_each = toset(["breathe-backend", "breathe-admin", "breathe-pdf", "breathe-test-runner", "pa-migration", "unifeed-backend", "unifeed-storefront", "unifeed-ingest", "unifeed-test"])
+  for_each = toset(["breathe-backend", "breathe-admin", "breathe-pdf", "breathe-test-runner", "pa-migration", "unifeed-backend", "unifeed-storefront", "unifeed-ingest", "unifeed-ingest-api", "unifeed-test"])
 
   project       = var.project_id
   location      = var.region
@@ -1141,6 +1141,80 @@ resource "google_cloud_run_v2_service_iam_member" "unifeed_ingest_public" {
 }
 
 # =============================================================================
+# Unifeed Ingest API — enrichment backend (Ktor)
+# =============================================================================
+
+resource "google_cloud_run_v2_service" "unifeed_ingest_api" {
+  name     = "unifeed-ingest-api"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
+  template {
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 1
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.project_id}/unifeed-ingest-api/unifeed-ingest-api:latest"
+      ports { container_port = 8080 }
+
+      resources {
+        limits = {
+          cpu    = "2"
+          memory = "1Gi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      env {
+        name  = "ENRICHMENT_PORT"
+        value = "8080"
+      }
+      env {
+        name  = "ENRICHMENT_DB"
+        value = "/data/enrichment"
+      }
+
+      startup_probe {
+        http_get {
+          path = "/health"
+          port = 8080
+        }
+        initial_delay_seconds = 5
+        timeout_seconds       = 3
+        period_seconds        = 5
+        failure_threshold     = 10
+      }
+    }
+
+    timeout = "600s"
+  }
+
+  labels = {
+    managed_by = "terraform"
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "unifeed_ingest_api_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.unifeed_ingest_api.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# =============================================================================
 # Zitadel Auth Server
 # =============================================================================
 
@@ -1278,6 +1352,10 @@ module "platform_lb" {
       cloud_run_service = google_cloud_run_v2_service.unifeed_ingest.name
       region            = var.region
     }
+    unifeed-ingest-api = {
+      cloud_run_service = google_cloud_run_v2_service.unifeed_ingest_api.name
+      region            = var.region
+    }
   }
 
   host_rules = {
@@ -1301,11 +1379,15 @@ module "platform_lb" {
       hosts   = ["ingest.unifeed.io"]
       backend = "unifeed-ingest"
     }
+    unifeed-ingest-api = {
+      hosts   = ["ingest-api.unifeed.io"]
+      backend = "unifeed-ingest-api"
+    }
   }
 
   default_backend = "zitadel"
 
-  domains = [var.zitadel_domain, var.unifeed_zitadel_domain, "test.breathebranding.co.uk", "test.dev.unifeed.io", "ingest.unifeed.io"]
+  domains = [var.zitadel_domain, var.unifeed_zitadel_domain, "test.breathebranding.co.uk", "test.dev.unifeed.io", "ingest.unifeed.io", "ingest-api.unifeed.io"]
 
   depends_on = [module.zitadel, module.unifeed_zitadel]
 }
@@ -1319,6 +1401,17 @@ resource "cloudflare_record" "unifeed_test" {
 
   zone_id = var.unifeed_cloudflare_zone_id
   name    = "test.dev"
+  content = module.platform_lb.ip_address
+  type    = "A"
+  proxied = false
+  ttl     = 300
+}
+
+resource "cloudflare_record" "unifeed_ingest_api" {
+  provider = cloudflare.unifeed
+
+  zone_id = var.unifeed_cloudflare_zone_id
+  name    = "ingest-api"
   content = module.platform_lb.ip_address
   type    = "A"
   proxied = false
