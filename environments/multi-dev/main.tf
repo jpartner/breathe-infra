@@ -93,11 +93,9 @@ resource "google_service_account" "storefront" {
   description  = "Service account for customer-facing storefront Cloud Run services"
 }
 
-# Storefront needs Secret Manager access for Zitadel client secrets and auth secrets
+# Storefront needs Secret Manager access for NextAuth session secrets
 resource "google_secret_manager_secret_iam_member" "storefront_secrets" {
   for_each = toset([
-    "storefront-breathe-dev-zitadel-client-secret",
-    "storefront-pa-dev-zitadel-client-secret",
     "storefront-breathe-auth-secret",
     "storefront-breathe-eu-auth-secret",
     "storefront-pa-auth-secret",
@@ -311,6 +309,14 @@ resource "google_secret_manager_secret_iam_member" "backend_typesense" {
 resource "google_secret_manager_secret_iam_member" "backend_anthropic" {
   project   = var.shared_project_id
   secret_id = "anthropic-api-key"
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.backend.email}"
+}
+
+# Grant backend access to Postmark API key (email notifications)
+resource "google_secret_manager_secret_iam_member" "backend_postmark" {
+  project   = var.shared_project_id
+  secret_id = "postmark-api-key"
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
@@ -1421,6 +1427,23 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
         name  = "ZITADEL_ISSUER"
         value = var.unifeed_zitadel_issuer
       }
+      env {
+        name = "UNIFEED_NOTIFICATIONS_POSTMARK_DEFAULT_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/postmark-api-key"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name  = "UNIFEED_NOTIFICATIONS_POSTMARK_DEFAULT_FROM_EMAIL"
+        value = "hello@breathebranding.co.uk"
+      }
+      env {
+        name  = "UNIFEED_NOTIFICATIONS_POSTMARK_DEFAULT_ADMIN_EMAIL"
+        value = "orders@breathebranding.co.uk"
+      }
 
       startup_probe {
         http_get {
@@ -1835,15 +1858,6 @@ resource "google_cloud_run_v2_service" "storefront_breathe" {
         value = var.storefront_breathe_client_id
       }
       env {
-        name = "AUTH_ZITADEL_SECRET"
-        value_source {
-          secret_key_ref {
-            secret  = "projects/${var.shared_project_id}/secrets/storefront-breathe-dev-zitadel-client-secret"
-            version = "latest"
-          }
-        }
-      }
-      env {
         name = "AUTH_SECRET"
         value_source {
           secret_key_ref {
@@ -1925,15 +1939,6 @@ resource "google_cloud_run_v2_service" "storefront_breathe_eu" {
         value = var.storefront_breathe_client_id
       }
       env {
-        name = "AUTH_ZITADEL_SECRET"
-        value_source {
-          secret_key_ref {
-            secret  = "projects/${var.shared_project_id}/secrets/storefront-breathe-dev-zitadel-client-secret"
-            version = "latest"
-          }
-        }
-      }
-      env {
         name = "AUTH_SECRET"
         value_source {
           secret_key_ref {
@@ -2013,15 +2018,6 @@ resource "google_cloud_run_v2_service" "storefront_pa" {
       env {
         name  = "AUTH_ZITADEL_ID"
         value = var.storefront_pa_client_id
-      }
-      env {
-        name = "AUTH_ZITADEL_SECRET"
-        value_source {
-          secret_key_ref {
-            secret  = "projects/${var.shared_project_id}/secrets/storefront-pa-dev-zitadel-client-secret"
-            version = "latest"
-          }
-        }
       }
       env {
         name = "AUTH_SECRET"

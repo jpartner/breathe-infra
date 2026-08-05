@@ -235,6 +235,18 @@ resource "google_secret_manager_secret_version" "zitadel_masterkey" {
 }
 
 # =============================================================================
+# External API secrets (values set manually via gcloud/console)
+# =============================================================================
+
+resource "google_secret_manager_secret" "postmark_api_key" {
+  project   = var.project_id
+  secret_id = "postmark-api-key"
+  replication {
+    auto {}
+  }
+}
+
+# =============================================================================
 # Artifact Registry
 # =============================================================================
 

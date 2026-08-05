@@ -67,35 +67,9 @@ module "unifeed_zitadel_config" {
 }
 
 # =============================================================================
-# Customer Auth — store OIDC client secrets and auth secrets in Secret Manager
+# Customer Auth — NextAuth session secrets in Secret Manager
+# Note: Customer OIDC apps use AUTH_METHOD_TYPE_NONE (public clients, no secret needed)
 # =============================================================================
-
-locals {
-  # Storefronts that need customer auth credentials
-  storefront_tenants = var.unifeed_zitadel_manage_config ? {
-    "breathe-dev" = "breathe-dev"
-    "breathe-eu-dev" = "breathe-dev"  # breathe-eu uses same Zitadel app as breathe
-    "pa-dev"      = "pa-dev"
-  } : {}
-}
-
-# Client secret for each tenant's customer OIDC app → Secret Manager
-resource "google_secret_manager_secret" "storefront_zitadel_secret" {
-  for_each  = var.unifeed_zitadel_manage_config ? toset(["breathe-dev", "pa-dev"]) : toset([])
-
-  project   = var.project_id
-  secret_id = "storefront-${each.key}-zitadel-client-secret"
-  replication {
-    auto {}
-  }
-}
-
-resource "google_secret_manager_secret_version" "storefront_zitadel_secret" {
-  for_each    = google_secret_manager_secret.storefront_zitadel_secret
-
-  secret      = each.value.id
-  secret_data = module.unifeed_zitadel_config[0].customer_client_secrets[each.key]
-}
 
 # NextAuth secret (random) for each storefront
 resource "random_password" "storefront_auth_secret" {
