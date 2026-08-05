@@ -127,7 +127,7 @@ resource "google_sql_database_instance" "main" {
 
 # Databases
 resource "google_sql_database" "envs" {
-  for_each = toset(["breathe_multi_dev"])
+  for_each = toset([])
 
   project  = var.project_id
   instance = google_sql_database_instance.main.name
@@ -198,7 +198,7 @@ resource "google_secret_manager_secret" "postmark_api_key" {
 # =============================================================================
 
 resource "google_artifact_registry_repository" "images" {
-  for_each = toset(["breathe-backend", "breathe-admin", "breathe-pdf", "pa-migration", "unifeed-backend", "unifeed-storefront", "unifeed-ingest", "unifeed-test"])
+  for_each = toset(["pa-migration", "unifeed-backend", "unifeed-storefront", "unifeed-ingest", "unifeed-test"])
 
   project       = var.project_id
   location      = var.region
@@ -279,93 +279,6 @@ resource "google_project_iam_member" "env_vpc_user" {
 # =============================================================================
 # Cloud Build Triggers — all on multi-tenant branch, deploy to dev
 # =============================================================================
-
-resource "google_cloudbuild_trigger" "backend_dev" {
-  project     = var.project_id
-  name        = "breathe-backend-dev"
-  description = "Build and deploy backend to dev on push to multi-tenant"
-  location    = var.region
-
-  github {
-    owner = var.github_owner
-    name  = "breathe-java"
-
-    push {
-      branch = "^multi-tenant$"
-    }
-  }
-
-  filename = "cloudbuild.yaml"
-
-  substitutions = {
-    _DEPLOY_PROJECT = "breathe-dev-env"
-    _ENV_NAME       = "dev"
-    _DEPLOY_REGION  = var.region
-    _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
-    _SHARED_PROJECT = var.project_id
-  }
-
-  service_account = google_service_account.cloudbuild.id
-}
-
-resource "google_cloudbuild_trigger" "admin_dev" {
-  project     = var.project_id
-  name        = "breathe-admin-dev"
-  description = "Build and deploy admin to dev on push to multi-tenant"
-  location    = var.region
-
-  github {
-    owner = var.github_owner
-    name  = "breathe-admin-nuxt-claude"
-
-    push {
-      branch = "^multi-tenant$"
-    }
-  }
-
-  filename = "cloudbuild.yaml"
-
-  substitutions = {
-    _DEPLOY_PROJECT = "breathe-dev-env"
-    _ENV_NAME       = "dev"
-    _DEPLOY_REGION  = var.region
-    _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
-    _SHARED_PROJECT = var.project_id
-    _SERVICE_NAME   = "breathe-admin"
-  }
-
-  service_account = google_service_account.cloudbuild.id
-}
-
-resource "google_cloudbuild_trigger" "pdf_dev" {
-  project     = var.project_id
-  name        = "breathe-pdf-dev"
-  description = "Build and deploy PDF service to dev on push to multi-tenant"
-  location    = var.region
-
-  github {
-    owner = var.github_owner
-    name  = "breathe-pdf-creation"
-
-    push {
-      branch = "^multi-tenant$"
-    }
-  }
-
-  filename = "cloudbuild.yaml"
-
-  substitutions = {
-    _DEPLOY_PROJECT = "breathe-dev-env"
-    _ENV_NAME       = "dev"
-    _DEPLOY_REGION  = var.region
-    _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
-    _SHARED_PROJECT = var.project_id
-    _SERVICE_NAME   = "breathe-pdf"
-  }
-
-  service_account = google_service_account.cloudbuild.id
-}
-
 
 resource "google_cloudbuild_trigger" "pa_migration_dev" {
   project     = var.project_id

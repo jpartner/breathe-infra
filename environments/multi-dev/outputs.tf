@@ -1,5 +1,5 @@
-output "backend_url" {
-  value = google_cloud_run_v2_service.backend.uri
+output "unifeed_backend_url" {
+  value = google_cloud_run_v2_service.unifeed_backend.uri
 }
 
 output "product_data_bucket" {
