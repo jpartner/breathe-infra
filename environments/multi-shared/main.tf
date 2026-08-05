@@ -89,16 +89,6 @@ resource "random_password" "db_app" {
   special = false
 }
 
-resource "random_password" "db_zitadel" {
-  length  = 32
-  special = false
-}
-
-resource "random_password" "zitadel_masterkey" {
-  length  = 32
-  special = false
-}
-
 resource "google_sql_database_instance" "main" {
   project          = var.project_id
   name             = "breathe-multi-db"
@@ -144,17 +134,7 @@ resource "google_sql_database" "envs" {
   name     = each.value
 }
 
-resource "google_sql_database" "zitadel" {
-  project  = var.project_id
-  instance = google_sql_database_instance.main.name
-  name     = "zitadel"
-}
 
-resource "google_sql_database" "test_runner" {
-  project  = var.project_id
-  instance = google_sql_database_instance.main.name
-  name     = "breathe_test"
-}
 
 # Users
 resource "google_sql_user" "admin" {
@@ -169,13 +149,6 @@ resource "google_sql_user" "app" {
   instance = google_sql_database_instance.main.name
   name     = "app"
   password = random_password.db_app.result
-}
-
-resource "google_sql_user" "zitadel" {
-  project  = var.project_id
-  instance = google_sql_database_instance.main.name
-  name     = "zitadel"
-  password = random_password.db_zitadel.result
 }
 
 # =============================================================================
@@ -208,32 +181,6 @@ resource "google_secret_manager_secret_version" "db_app_password" {
   secret_data = random_password.db_app.result
 }
 
-resource "google_secret_manager_secret" "zitadel_db_password" {
-  project   = var.project_id
-  secret_id = "zitadel-db-password"
-  replication {
-    auto {}
-  }
-}
-
-resource "google_secret_manager_secret_version" "zitadel_db_password" {
-  secret      = google_secret_manager_secret.zitadel_db_password.id
-  secret_data = random_password.db_zitadel.result
-}
-
-resource "google_secret_manager_secret" "zitadel_masterkey" {
-  project   = var.project_id
-  secret_id = "zitadel-masterkey"
-  replication {
-    auto {}
-  }
-}
-
-resource "google_secret_manager_secret_version" "zitadel_masterkey" {
-  secret      = google_secret_manager_secret.zitadel_masterkey.id
-  secret_data = random_password.zitadel_masterkey.result
-}
-
 # =============================================================================
 # External API secrets (values set manually via gcloud/console)
 # =============================================================================
@@ -251,7 +198,7 @@ resource "google_secret_manager_secret" "postmark_api_key" {
 # =============================================================================
 
 resource "google_artifact_registry_repository" "images" {
-  for_each = toset(["breathe-backend", "breathe-admin", "breathe-pdf", "breathe-test-runner", "pa-migration", "unifeed-backend", "unifeed-storefront", "unifeed-ingest", "unifeed-test"])
+  for_each = toset(["breathe-backend", "breathe-admin", "breathe-pdf", "pa-migration", "unifeed-backend", "unifeed-storefront", "unifeed-ingest", "unifeed-test"])
 
   project       = var.project_id
   location      = var.region
@@ -673,172 +620,6 @@ resource "google_project_iam_member" "test_runner_sa_user" {
   member  = "serviceAccount:${google_service_account.test_runner.email}"
 }
 
-resource "google_cloud_run_v2_service" "test_runner" {
-  name     = "breathe-test-runner"
-  project  = var.project_id
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
-
-  lifecycle {
-    ignore_changes = [
-      template[0].containers[0].image,
-      template[0].labels,
-      labels,
-    ]
-  }
-
-  template {
-    service_account = google_service_account.test_runner.email
-
-    vpc_access {
-      connector = local.vpc_connector_id
-      egress    = "PRIVATE_RANGES_ONLY"
-    }
-
-    scaling {
-      min_instance_count = 0
-      max_instance_count = 1
-    }
-
-    containers {
-      image = "${var.region}-docker.pkg.dev/${var.project_id}/breathe-test-runner/breathe-test-runner:latest"
-
-      ports {
-        container_port = 3000
-      }
-
-      resources {
-        limits = {
-          cpu    = "2"
-          memory = "2Gi"
-        }
-        cpu_idle          = true
-        startup_cpu_boost = true
-      }
-
-      env {
-        name  = "DEV_BACKEND_URL"
-        value = "https://breathe-backend-g5eqfyjkfa-nw.a.run.app"
-      }
-      env {
-        name  = "DEV_ADMIN_URL"
-        value = "https://breathe-admin-g5eqfyjkfa-nw.a.run.app"
-      }
-      env {
-        name  = "DEV_PDF_URL"
-        value = "https://breathe-pdf-g5eqfyjkfa-nw.a.run.app"
-      }
-      env {
-        name  = "GCP_DEV_PROJECT"
-        value = "breathe-dev-env"
-      }
-      env {
-        name  = "GCP_STAGING_PROJECT"
-        value = "breathe-staging-env"
-      }
-      env {
-        name  = "GCP_REGION"
-        value = var.region
-      }
-      env {
-        name  = "DB_HOST"
-        value = google_sql_database_instance.main.private_ip_address
-      }
-      env {
-        name  = "DB_NAME"
-        value = "breathe_test"
-      }
-      env {
-        name  = "DB_USER"
-        value = "app"
-      }
-      env {
-        name = "DB_PASSWORD"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.db_app_password.id
-            version = "latest"
-          }
-        }
-      }
-      env {
-        name  = "TEST_LOGS_BUCKET"
-        value = google_storage_bucket.test_logs.name
-      }
-
-      # Auth (NextAuth + Zitadel OIDC)
-      env {
-        name  = "AUTH_URL"
-        value = "https://test.breathebranding.co.uk"
-      }
-      env {
-        name = "AUTH_SECRET"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.test_runner_auth_secret.id
-            version = "latest"
-          }
-        }
-      }
-      env {
-        name  = "ZITADEL_ISSUER"
-        value = "https://${var.zitadel_domain}"
-      }
-      env {
-        name  = "ZITADEL_CLIENT_ID"
-        value = zitadel_application_oidc.test_runner.client_id
-      }
-      env {
-        name = "ZITADEL_CLIENT_SECRET"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.test_runner_zitadel_secret.id
-            version = "latest"
-          }
-        }
-      }
-
-      # Test user PATs (for authenticated API tests)
-      env {
-        name  = "TEST_ADMIN_PAT"
-        value = var.test_admin_pat
-      }
-      env {
-        name  = "TEST_CUSTOMER_PAT"
-        value = var.test_customer_pat
-      }
-      env {
-        name  = "TEST_NOROLE_PAT"
-        value = var.test_norole_pat
-      }
-
-      startup_probe {
-        tcp_socket {
-          port = 3000
-        }
-        initial_delay_seconds = 5
-        timeout_seconds       = 5
-        period_seconds        = 10
-        failure_threshold     = 12
-      }
-    }
-
-    timeout = "3600s"
-  }
-
-  labels = {
-    managed_by = "terraform"
-  }
-}
-
-resource "google_cloud_run_v2_service_iam_member" "test_runner_public" {
-  project  = var.project_id
-  location = var.region
-  name     = google_cloud_run_v2_service.test_runner.name
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
-
 # =============================================================================
 # Unifeed Test Runner
 # =============================================================================
@@ -1083,37 +864,6 @@ resource "google_cloud_run_v2_service_iam_member" "unifeed_ingest_public" {
 
 
 # =============================================================================
-# Zitadel Auth Server (auth.breathebranding.co.uk)
-# Used by: breathe-test-runner, zitadel-platform.tf (ingest OIDC, platform tools)
-# TODO: migrate platform resources to unifeed-zitadel, then remove
-# =============================================================================
-
-module "zitadel" {
-  source = "../../modules/zitadel"
-
-  project_id       = var.project_id
-  region           = var.region
-  vpc_connector_id = local.vpc_connector_id
-
-  db_host                    = google_sql_database_instance.main.private_ip_address
-  db_name                    = "zitadel"
-  db_user                    = "zitadel"
-  db_password_secret_id      = google_secret_manager_secret.zitadel_db_password.secret_id
-  db_admin_password_secret_id = google_secret_manager_secret.db_admin_password.secret_id
-
-  domain              = var.zitadel_domain
-  image               = "ghcr.io/zitadel/zitadel:v2.71.5"
-  masterkey_secret_id = google_secret_manager_secret.zitadel_masterkey.secret_id
-
-  depends_on = [
-    google_sql_database.zitadel,
-    google_sql_user.zitadel,
-    google_secret_manager_secret_version.zitadel_db_password,
-    google_secret_manager_secret_version.zitadel_masterkey,
-  ]
-}
-
-# =============================================================================
 # Unifeed Zitadel Auth Server (auth.unifeed.io)
 # =============================================================================
 
@@ -1202,16 +952,8 @@ module "platform_lb" {
   project_id = var.project_id
 
   backends = {
-    zitadel = {
-      cloud_run_service = "zitadel"
-      region            = var.region
-    }
     unifeed-zitadel = {
       cloud_run_service = "unifeed-zitadel"
-      region            = var.region
-    }
-    test-runner = {
-      cloud_run_service = "breathe-test-runner"
       region            = var.region
     }
     unifeed-test = {
@@ -1225,17 +967,9 @@ module "platform_lb" {
   }
 
   host_rules = {
-    auth = {
-      hosts   = [var.zitadel_domain]
-      backend = "zitadel"
-    }
     unifeed-auth = {
       hosts   = [var.unifeed_zitadel_domain]
       backend = "unifeed-zitadel"
-    }
-    test = {
-      hosts   = ["test.breathebranding.co.uk"]
-      backend = "test-runner"
     }
     unifeed-test = {
       hosts   = ["test.dev.unifeed.io"]
@@ -1247,11 +981,11 @@ module "platform_lb" {
     }
   }
 
-  default_backend = "zitadel"
+  default_backend = "unifeed-zitadel"
 
-  domains = [var.zitadel_domain, var.unifeed_zitadel_domain, "test.breathebranding.co.uk", "test.dev.unifeed.io", "ingest.unifeed.io"]
+  domains = [var.unifeed_zitadel_domain, "test.dev.unifeed.io", "ingest.unifeed.io"]
 
-  depends_on = [module.zitadel, module.unifeed_zitadel]
+  depends_on = [module.unifeed_zitadel]
 }
 
 # =============================================================================
