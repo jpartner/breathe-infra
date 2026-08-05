@@ -239,7 +239,7 @@ resource "google_secret_manager_secret_version" "zitadel_masterkey" {
 # =============================================================================
 
 resource "google_artifact_registry_repository" "images" {
-  for_each = toset(["breathe-backend", "breathe-admin", "breathe-pdf", "breathe-test-runner", "pa-migration", "unifeed-backend", "unifeed-storefront", "unifeed-test"])
+  for_each = toset(["breathe-backend", "breathe-admin", "breathe-pdf", "breathe-test-runner", "pa-migration", "unifeed-backend", "unifeed-storefront", "unifeed-ops", "unifeed-test"])
 
   project       = var.project_id
   location      = var.region
