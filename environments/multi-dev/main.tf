@@ -1429,6 +1429,15 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
         value = var.unifeed_zitadel_issuer
       }
       env {
+        name = "WORKER_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/worker-api-key"
+            version = "latest"
+          }
+        }
+      }
+      env {
         name = "UNIFEED_NOTIFICATIONS_POSTMARK_DEFAULT_API_KEY"
         value_source {
           secret_key_ref {

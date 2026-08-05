@@ -137,7 +137,7 @@ resource "google_sql_database_instance" "main" {
 
 # Databases
 resource "google_sql_database" "envs" {
-  for_each = toset(["breathe_multi_dev", "breathe_multi_staging", "breathe_multi_prod"])
+  for_each = toset(["breathe_multi_dev"])
 
   project  = var.project_id
   instance = google_sql_database_instance.main.name
@@ -419,34 +419,6 @@ resource "google_cloudbuild_trigger" "pdf_dev" {
   service_account = google_service_account.cloudbuild.id
 }
 
-resource "google_cloudbuild_trigger" "test_runner" {
-  project     = var.project_id
-  name        = "breathe-test-runner"
-  description = "Build and deploy test runner on push to main"
-  location    = var.region
-
-  github {
-    owner = var.github_owner
-    name  = "breathe-multi-test"
-
-    push {
-      branch = "^main$"
-    }
-  }
-
-  filename = "cloudbuild.yaml"
-
-  substitutions = {
-    _DEPLOY_PROJECT = var.project_id
-    _ENV_NAME       = "shared"
-    _DEPLOY_REGION  = var.region
-    _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
-    _SHARED_PROJECT = var.project_id
-    _SERVICE_NAME   = "breathe-test-runner"
-  }
-
-  service_account = google_service_account.cloudbuild.id
-}
 
 resource "google_cloudbuild_trigger" "pa_migration_dev" {
   project     = var.project_id
@@ -605,37 +577,6 @@ resource "google_project_iam_member" "test_runner_sql" {
   project = var.project_id
   role    = "roles/cloudsql.client"
   member  = "serviceAccount:${google_service_account.test_runner.email}"
-}
-
-# Test runner auth secrets
-resource "google_secret_manager_secret" "test_runner_auth_secret" {
-  project   = var.project_id
-  secret_id = "test-runner-auth-secret"
-  replication {
-    auto {}
-  }
-}
-
-resource "google_secret_manager_secret" "test_runner_zitadel_secret" {
-  project   = var.project_id
-  secret_id = "test-runner-zitadel-secret"
-  replication {
-    auto {}
-  }
-}
-
-resource "google_secret_manager_secret_iam_member" "test_runner_auth" {
-  project   = var.project_id
-  secret_id = google_secret_manager_secret.test_runner_auth_secret.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.test_runner.email}"
-}
-
-resource "google_secret_manager_secret_iam_member" "test_runner_zitadel" {
-  project   = var.project_id
-  secret_id = google_secret_manager_secret.test_runner_zitadel_secret.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.test_runner.email}"
 }
 
 # Test runner needs to read test user PATs and login password
@@ -1142,7 +1083,9 @@ resource "google_cloud_run_v2_service_iam_member" "unifeed_ingest_public" {
 
 
 # =============================================================================
-# Zitadel Auth Server
+# Zitadel Auth Server (auth.breathebranding.co.uk)
+# Used by: breathe-test-runner, zitadel-platform.tf (ingest OIDC, platform tools)
+# TODO: migrate platform resources to unifeed-zitadel, then remove
 # =============================================================================
 
 module "zitadel" {
