@@ -73,7 +73,7 @@ module "unifeed_zitadel_config" {
 
 # NextAuth secret (random) for each storefront
 resource "random_password" "storefront_auth_secret" {
-  for_each = toset(["breathe", "breathe-eu", "pa"])
+  for_each = toset(["breathe", "breathe-eu", "pa", "uniten"])
   length   = 32
   special  = false
 }

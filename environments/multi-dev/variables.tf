@@ -70,6 +70,12 @@ variable "storefront_pa_client_id" {
   default     = "384307382844501516"
 }
 
+variable "storefront_uniten_client_id" {
+  description = "Zitadel customer OIDC client ID for Uniten storefront (dev)"
+  type        = string
+  default     = "384307981908553228"
+}
+
 # Cloudflare
 variable "cloudflare_api_token" {
   description = "Cloudflare API token with Zone:DNS:Edit for breathebranding.co.uk"

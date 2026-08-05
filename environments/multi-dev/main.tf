@@ -99,6 +99,7 @@ resource "google_secret_manager_secret_iam_member" "storefront_secrets" {
     "storefront-breathe-auth-secret",
     "storefront-breathe-eu-auth-secret",
     "storefront-pa-auth-secret",
+    "storefront-uniten-auth-secret",
   ])
 
   project   = var.shared_project_id
@@ -2068,6 +2069,8 @@ resource "google_cloud_run_v2_service" "storefront_uniten" {
   }
 
   template {
+    service_account = google_service_account.storefront.email
+
     scaling {
       min_instance_count = 0
       max_instance_count = 1
@@ -2093,6 +2096,23 @@ resource "google_cloud_run_v2_service" "storefront_uniten" {
       env {
         name  = "TENANT_CODE"
         value = "uniten"
+      }
+      env {
+        name  = "AUTH_ZITADEL_ISSUER"
+        value = var.unifeed_zitadel_issuer
+      }
+      env {
+        name  = "AUTH_ZITADEL_ID"
+        value = var.storefront_uniten_client_id
+      }
+      env {
+        name = "AUTH_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/storefront-uniten-auth-secret"
+            version = "latest"
+          }
+        }
       }
     }
 
