@@ -921,6 +921,32 @@ resource "google_cloud_run_v2_service" "unifeed_test_runner" {
         name  = "TEST_TENANT"
         value = "uniten"
       }
+      env {
+        name  = "DB_HOST"
+        value = google_sql_database_instance.main.private_ip_address
+      }
+      env {
+        name  = "DB_NAME"
+        value = "unifeed_test"
+      }
+      env {
+        name  = "DB_USER"
+        value = "app"
+      }
+      env {
+        name = "DB_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = "db-app-password"
+            version = "latest"
+          }
+        }
+      }
+    }
+
+    vpc_access {
+      connector = local.vpc_connector_id
+      egress    = "PRIVATE_RANGES_ONLY"
     }
 
     timeout = "300s"
