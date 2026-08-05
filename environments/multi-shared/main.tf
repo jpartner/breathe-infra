@@ -492,10 +492,10 @@ resource "google_cloudbuild_trigger" "unifeed_backend_dev" {
   service_account = google_service_account.cloudbuild.id
 }
 
-resource "google_cloudbuild_trigger" "unifeed_breathe_dev" {
+resource "google_cloudbuild_trigger" "unifeed_storefronts_dev" {
   project     = var.project_id
-  name        = "unifeed-breathe-dev"
-  description = "Build and deploy Breathe storefront to dev on push to main"
+  name        = "unifeed-storefronts-dev"
+  description = "Build and deploy all storefronts (breathe, pa, uniten) to dev on push to main"
   location    = var.region
 
   github {
@@ -507,63 +507,7 @@ resource "google_cloudbuild_trigger" "unifeed_breathe_dev" {
     }
   }
 
-  filename = "cloudbuild-breathe.yaml"
-
-  substitutions = {
-    _DEPLOY_PROJECT = "breathe-dev-env"
-    _ENV_NAME       = "dev"
-    _DEPLOY_REGION  = var.region
-    _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
-    _SHARED_PROJECT = var.project_id
-  }
-
-  service_account = google_service_account.cloudbuild.id
-}
-
-resource "google_cloudbuild_trigger" "unifeed_pa_dev" {
-  project     = var.project_id
-  name        = "unifeed-pa-dev"
-  description = "Build and deploy PA storefront to dev on push to main"
-  location    = var.region
-
-  github {
-    owner = var.github_owner
-    name  = "unifeed-ui"
-
-    push {
-      branch = "^main$"
-    }
-  }
-
-  filename = "cloudbuild-pa.yaml"
-
-  substitutions = {
-    _DEPLOY_PROJECT = "breathe-dev-env"
-    _ENV_NAME       = "dev"
-    _DEPLOY_REGION  = var.region
-    _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
-    _SHARED_PROJECT = var.project_id
-  }
-
-  service_account = google_service_account.cloudbuild.id
-}
-
-resource "google_cloudbuild_trigger" "unifeed_uniten_dev" {
-  project     = var.project_id
-  name        = "unifeed-uniten-dev"
-  description = "Build and deploy Uniten test storefront to dev on push to main"
-  location    = var.region
-
-  github {
-    owner = var.github_owner
-    name  = "unifeed-ui"
-
-    push {
-      branch = "^main$"
-    }
-  }
-
-  filename = "cloudbuild-uniten.yaml"
+  filename = "cloudbuild.yaml"
 
   substitutions = {
     _DEPLOY_PROJECT = "breathe-dev-env"
