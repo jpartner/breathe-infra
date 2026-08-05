@@ -285,6 +285,13 @@ resource "google_secret_manager_secret_iam_member" "backend_db" {
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
 
+# Grant backend access to Cloud KMS for tenant secret encryption/decryption
+resource "google_kms_crypto_key_iam_member" "backend_kms" {
+  crypto_key_id = "projects/${var.shared_project_id}/locations/${var.region}/keyRings/unifeed-secrets/cryptoKeys/tenant-secrets-dev"
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  member        = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # =============================================================================
 # Cloud Run — Unifeed Backend
 # =============================================================================
@@ -492,6 +499,149 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
       env {
         name  = "UNIFEED_NOTIFICATIONS_POSTMARK_DEFAULT_ADMIN_EMAIL"
         value = "dev@breathebranding.co.uk"
+      }
+
+      # Supplier API credentials (for enrichment feed fetching)
+      env {
+        name  = "PRESELI_CLIENT_ID"
+        value = "MzM4Nw==7WIM3Vw5vrjJd64_CzmOb0BS8DtixNauRQXFeHnKyq"
+      }
+      env {
+        name = "PRESELI_SECRET_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/preseli-secret-key"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name  = "IMPRESSION_EUROPE_USERNAME"
+        value = "pa-promotions"
+      }
+      env {
+        name = "IMPRESSION_EUROPE_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/impression-europe-password"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "OUTDOORS_COMPANY_USER_TOKEN"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/outdoors-company-user-token"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name  = "XOOPAR_USERNAME"
+        value = "PA_PROMOTIONS"
+      }
+      env {
+        name = "XOOPAR_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/xoopar-password"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name  = "KERAMIKOS_USERNAME"
+        value = "tom@pa-promotions.co.uk"
+      }
+      env {
+        name = "KERAMIKOS_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/keramikos-password"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "UMBRELLA_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/umbrella-api-key"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name  = "BIC_GRAPHIC_CLIENT_ID"
+        value = "5de810b5-f818-4496-888a-ed129a260bc0"
+      }
+      env {
+        name  = "BIC_GRAPHIC_USERNAME"
+        value = "tom@pa-promotions.co.uk"
+      }
+      env {
+        name = "BIC_GRAPHIC_CLIENT_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/bic-graphic-client-secret"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "BIC_GRAPHIC_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/bic-graphic-password"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "LALTEX_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/laltex-api-key"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "CRYSTAL_GALLERIES_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/crystal-galleries-api-key"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "MIDOCEAN_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/midocean-api-key"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "USB_GROUP_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/usbgroup-api-key"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "PINPOINT_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/pinpoint-api-key"
+            version = "latest"
+          }
+        }
       }
 
       startup_probe {

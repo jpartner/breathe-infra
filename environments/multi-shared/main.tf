@@ -939,6 +939,42 @@ resource "cloudflare_record" "unifeed_auth" {
 }
 
 # =============================================================================
+# Cloud KMS — Tenant Secret Encryption
+# One keyring in shared, one key per environment.
+# Each env's backend SA gets decrypt only on its own key.
+# =============================================================================
+
+resource "google_project_service" "kms" {
+  project = var.project_id
+  service = "cloudkms.googleapis.com"
+
+  disable_dependent_services = false
+  disable_on_destroy         = false
+}
+
+resource "google_kms_key_ring" "tenant_secrets" {
+  project  = var.project_id
+  name     = "unifeed-secrets"
+  location = var.region
+
+  depends_on = [google_project_service.kms]
+}
+
+resource "google_kms_crypto_key" "tenant_secrets" {
+  for_each = toset(["dev", "staging", "production"])
+
+  name     = "tenant-secrets-${each.key}"
+  key_ring = google_kms_key_ring.tenant_secrets.id
+  purpose  = "ENCRYPT_DECRYPT"
+
+  rotation_period = "7776000s" # 90 days
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# =============================================================================
 # Cloudflare DNS — breathebranding.co.uk
 # =============================================================================
 
