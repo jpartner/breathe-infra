@@ -12,6 +12,7 @@ variable "environments" {
     display_name = string
     api_domain   = string
     admin_domain = string
+    ops_domain   = string
   }))
 }
 

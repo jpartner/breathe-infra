@@ -65,3 +65,34 @@ variable "cloudflare_zone_id" {
   type        = string
   default     = "4dc7218313de868751814ec5055e7fd7"
 }
+
+variable "unifeed_cloudflare_api_token" {
+  description = "Cloudflare API token for unifeed.io DNS"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "unifeed_cloudflare_zone_id" {
+  description = "Cloudflare zone ID for unifeed.io"
+  type        = string
+  default     = "5f93decf4a452ae42913b147b4f6ed74"
+}
+
+variable "breathe_eu_cloudflare_zone_id" {
+  description = "Cloudflare zone ID for breathebranding.eu"
+  type        = string
+  default     = "dfe1f68487b88da8faa3ae5dba7939d2"
+}
+
+variable "db_host" {
+  description = "Cloud SQL private IP"
+  type        = string
+  default     = "10.219.0.5"
+}
+
+variable "typesense_host" {
+  description = "Typesense Cloud host"
+  type        = string
+  default     = "c7op2qkelxuh81n3p-1.a1.typesense.net"
+}

@@ -4,9 +4,9 @@
 
 resource "google_service_account" "zitadel" {
   project      = var.project_id
-  account_id   = "sa-zitadel"
-  display_name = "Zitadel Auth Server"
-  description  = "Service account for Zitadel identity provider"
+  account_id   = "sa-${var.service_name}"
+  display_name = "${var.service_name} Auth Server"
+  description  = "Service account for ${var.service_name} identity provider"
 }
 
 # Zitadel needs Cloud SQL access
@@ -40,7 +40,7 @@ resource "google_secret_manager_secret_iam_member" "zitadel_admin_password" {
 
 # Cloud Run service for Zitadel
 resource "google_cloud_run_v2_service" "zitadel" {
-  name     = "zitadel"
+  name     = var.service_name
   project  = var.project_id
   location = var.region
   ingress  = "INGRESS_TRAFFIC_ALL"
@@ -189,7 +189,7 @@ resource "google_cloud_run_v2_service" "zitadel" {
   }
 
   labels = {
-    service    = "zitadel"
+    service    = var.service_name
     managed_by = "terraform"
   }
 }

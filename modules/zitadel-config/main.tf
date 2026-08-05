@@ -34,6 +34,7 @@ locals {
         display_name = "${tenant.display_name} (${env.display_name})"
         api_domain   = env.api_domain
         admin_domain = env.admin_domain
+        ops_domain   = env.ops_domain
         app_domains  = lookup(tenant.domains, env_key, [])
       }
     }
@@ -81,6 +82,37 @@ resource "zitadel_application_oidc" "admin" {
   post_logout_redirect_uris = [
     "https://${each.value.admin_domain}",
     "http://localhost:3001",
+  ]
+
+  response_types              = ["OIDC_RESPONSE_TYPE_CODE"]
+  grant_types                 = ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"]
+  app_type                    = "OIDC_APP_TYPE_USER_AGENT"
+  auth_method_type            = "OIDC_AUTH_METHOD_TYPE_NONE"
+  access_token_type           = "OIDC_TOKEN_TYPE_JWT"
+  id_token_role_assertion     = true
+  id_token_userinfo_assertion = true
+  access_token_role_assertion = true
+}
+
+# =============================================================================
+# OIDC Applications — Ops UI (per tenant × environment)
+# =============================================================================
+
+resource "zitadel_application_oidc" "ops" {
+  for_each = local.tenant_envs
+
+  org_id     = each.value.org_id
+  project_id = zitadel_project.envs[each.key].id
+  name       = "Ops UI"
+
+  redirect_uris = [
+    "https://${each.value.ops_domain}",
+    "http://localhost:3002",
+  ]
+
+  post_logout_redirect_uris = [
+    "https://${each.value.ops_domain}",
+    "http://localhost:3002",
   ]
 
   response_types              = ["OIDC_RESPONSE_TYPE_CODE"]

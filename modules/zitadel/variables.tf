@@ -53,3 +53,9 @@ variable "image" {
   default     = "ghcr.io/zitadel/zitadel:latest"
 }
 
+variable "service_name" {
+  description = "Cloud Run service name"
+  type        = string
+  default     = "zitadel"
+}
+

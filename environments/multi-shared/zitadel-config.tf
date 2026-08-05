@@ -40,16 +40,19 @@ module "zitadel_config" {
       display_name = "Development"
       api_domain   = "api.dev.breathebranding.co.uk"
       admin_domain = "admin.dev.breathebranding.co.uk"
+      ops_domain   = "ops.dev.breathebranding.co.uk"
     }
     staging = {
       display_name = "Staging"
       api_domain   = "api.staging.breathebranding.co.uk"
       admin_domain = "admin.staging.breathebranding.co.uk"
+      ops_domain   = "ops.staging.breathebranding.co.uk"
     }
     prod = {
       display_name = "Production"
       api_domain   = "api.breathebranding.co.uk"
       admin_domain = "admin.breathebranding.co.uk"
+      ops_domain   = "ops.breathebranding.co.uk"
     }
   }
 }

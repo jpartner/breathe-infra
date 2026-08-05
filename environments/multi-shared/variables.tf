@@ -34,6 +34,37 @@ variable "zitadel_domain" {
   default     = "auth.breathebranding.co.uk"
 }
 
+variable "unifeed_zitadel_domain" {
+  description = "Domain for Unifeed Zitadel auth server"
+  type        = string
+  default     = "auth.unifeed.io"
+}
+
+variable "unifeed_zitadel_key_path" {
+  description = "Path to Unifeed Zitadel service account JSON key"
+  type        = string
+  default     = ""
+}
+
+variable "unifeed_zitadel_manage_config" {
+  description = "Whether to manage Unifeed Zitadel orgs/projects/apps"
+  type        = bool
+  default     = false
+}
+
+variable "unifeed_cloudflare_zone_id" {
+  description = "Cloudflare zone ID for unifeed.io"
+  type        = string
+  default     = "5f93decf4a452ae42913b147b4f6ed74"
+}
+
+variable "unifeed_cloudflare_api_token" {
+  description = "Cloudflare API token for unifeed.io DNS management"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "zitadel_service_account_key_path" {
   description = "Path to Zitadel service account JSON key (for Terraform provider auth)"
   type        = string

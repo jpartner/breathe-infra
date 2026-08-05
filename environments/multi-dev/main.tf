@@ -2009,68 +2009,6 @@ resource "google_cloud_run_v2_service_iam_member" "storefront_uniten_public" {
 }
 
 # =============================================================================
-# Unifeed Ops — internal operations UI (enrichment review, etc.)
-# =============================================================================
-
-resource "google_cloud_run_v2_service" "unifeed_ops" {
-  name     = "unifeed-ops"
-  project  = var.project_id
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
-
-  lifecycle {
-    ignore_changes = [
-      template[0].containers[0].image,
-      template[0].labels,
-      labels,
-    ]
-  }
-
-  template {
-    scaling {
-      min_instance_count = 0
-      max_instance_count = 1
-    }
-
-    containers {
-      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/unifeed-ops/unifeed-ops:latest"
-      ports { container_port = 3000 }
-
-      resources {
-        limits = {
-          cpu    = "1"
-          memory = "512Mi"
-        }
-        cpu_idle          = true
-        startup_cpu_boost = true
-      }
-
-      env {
-        name  = "NEXT_PUBLIC_ENRICHMENT_API"
-        value = "https://ops.dev.unifeed.io"
-      }
-    }
-
-    timeout = "60s"
-  }
-
-  labels = {
-    environment = var.environment
-    managed_by  = "terraform"
-  }
-
-  depends_on = [google_project_service.apis]
-}
-
-resource "google_cloud_run_v2_service_iam_member" "unifeed_ops_public" {
-  project  = var.project_id
-  location = var.region
-  name     = google_cloud_run_v2_service.unifeed_ops.name
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
-
-# =============================================================================
 # Load Balancer — routes custom domains to Cloud Run services
 # =============================================================================
 
@@ -2120,10 +2058,6 @@ module "dev_lb" {
       cloud_run_service = google_cloud_run_v2_service.storefront_uniten.name
       region            = var.region
     }
-    unifeed-ops = {
-      cloud_run_service = google_cloud_run_v2_service.unifeed_ops.name
-      region            = var.region
-    }
   }
 
   host_rules = {
@@ -2167,10 +2101,6 @@ module "dev_lb" {
       hosts   = ["uniten.dev.unifeed.io"]
       backend = "storefront-uniten"
     }
-    unifeed-ops = {
-      hosts   = ["ops.dev.unifeed.io"]
-      backend = "unifeed-ops"
-    }
   }
 
   default_backend = "backend"
@@ -2186,7 +2116,6 @@ module "dev_lb" {
     "dev.breathebranding.eu",
     "pa.dev.unifeed.io",
     "uniten.dev.unifeed.io",
-    "ops.dev.unifeed.io",
   ]
 }
 
@@ -2220,7 +2149,6 @@ resource "cloudflare_record" "dev_unifeed" {
     "api.dev"    = "api.dev"
     "pa.dev"     = "pa.dev"
     "uniten.dev" = "uniten.dev"
-    "ops.dev"    = "ops.dev"
   }
 
   zone_id = var.unifeed_cloudflare_zone_id

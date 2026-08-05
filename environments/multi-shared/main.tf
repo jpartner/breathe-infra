@@ -239,7 +239,7 @@ resource "google_secret_manager_secret_version" "zitadel_masterkey" {
 # =============================================================================
 
 resource "google_artifact_registry_repository" "images" {
-  for_each = toset(["breathe-backend", "breathe-admin", "breathe-pdf", "breathe-test-runner", "pa-migration", "unifeed-backend", "unifeed-storefront", "unifeed-ops", "unifeed-test"])
+  for_each = toset(["breathe-backend", "breathe-admin", "breathe-pdf", "breathe-test-runner", "pa-migration", "unifeed-backend", "unifeed-storefront", "unifeed-ingest", "unifeed-test"])
 
   project       = var.project_id
   location      = var.region
@@ -967,6 +967,61 @@ resource "google_cloud_run_v2_service_iam_member" "unifeed_test_runner_public" {
 }
 
 # =============================================================================
+# Unifeed Ingest — supplier data ingestion and enrichment UI
+# =============================================================================
+
+resource "google_cloud_run_v2_service" "unifeed_ingest" {
+  name     = "unifeed-ingest"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
+
+  template {
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 1
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.project_id}/unifeed-ingest/unifeed-ingest:latest"
+      ports { container_port = 3000 }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+    }
+
+    timeout = "60s"
+  }
+
+  labels = {
+    managed_by = "terraform"
+  }
+
+}
+
+resource "google_cloud_run_v2_service_iam_member" "unifeed_ingest_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.unifeed_ingest.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# =============================================================================
 # Zitadel Auth Server
 # =============================================================================
 
@@ -1100,6 +1155,10 @@ module "platform_lb" {
       cloud_run_service = "unifeed-test"
       region            = var.region
     }
+    unifeed-ingest = {
+      cloud_run_service = google_cloud_run_v2_service.unifeed_ingest.name
+      region            = var.region
+    }
   }
 
   host_rules = {
@@ -1119,11 +1178,15 @@ module "platform_lb" {
       hosts   = ["test.dev.unifeed.io"]
       backend = "unifeed-test"
     }
+    unifeed-ingest = {
+      hosts   = ["ingest.unifeed.io"]
+      backend = "unifeed-ingest"
+    }
   }
 
   default_backend = "zitadel"
 
-  domains = [var.zitadel_domain, var.unifeed_zitadel_domain, "test.breathebranding.co.uk", "test.dev.unifeed.io"]
+  domains = [var.zitadel_domain, var.unifeed_zitadel_domain, "test.breathebranding.co.uk", "test.dev.unifeed.io", "ingest.unifeed.io"]
 
   depends_on = [module.zitadel, module.unifeed_zitadel]
 }
@@ -1137,6 +1200,17 @@ resource "cloudflare_record" "unifeed_test" {
 
   zone_id = var.unifeed_cloudflare_zone_id
   name    = "test.dev"
+  content = module.platform_lb.ip_address
+  type    = "A"
+  proxied = false
+  ttl     = 300
+}
+
+resource "cloudflare_record" "unifeed_ingest" {
+  provider = cloudflare.unifeed
+
+  zone_id = var.unifeed_cloudflare_zone_id
+  name    = "ingest"
   content = module.platform_lb.ip_address
   type    = "A"
   proxied = false
