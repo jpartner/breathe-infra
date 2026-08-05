@@ -13,6 +13,16 @@ resource "zitadel_project" "ingest" {
   project_role_assertion = true
 }
 
+resource "zitadel_project_role" "ingest_admin" {
+  provider = zitadel.unifeed
+
+  org_id       = local.unifeed_org_id
+  project_id   = zitadel_project.ingest.id
+  role_key     = "admin"
+  display_name = "Ingest Administrator"
+  group        = "platform"
+}
+
 resource "zitadel_application_oidc" "ingest" {
   provider = zitadel.unifeed
 
