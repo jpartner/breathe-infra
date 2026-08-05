@@ -1002,6 +1002,37 @@ resource "google_cloud_run_v2_service" "unifeed_ingest" {
         cpu_idle          = true
         startup_cpu_boost = true
       }
+
+      env {
+        name  = "NEXTAUTH_URL"
+        value = "https://ingest.unifeed.io"
+      }
+      env {
+        name  = "ZITADEL_ISSUER"
+        value = "https://${var.zitadel_domain}"
+      }
+      env {
+        name  = "ZITADEL_CLIENT_ID"
+        value = zitadel_application_oidc.ingest.client_id
+      }
+      env {
+        name = "ZITADEL_CLIENT_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.ingest_zitadel_secret.id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "NEXTAUTH_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.ingest_auth_secret.id
+            version = "latest"
+          }
+        }
+      }
     }
 
     timeout = "60s"
