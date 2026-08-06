@@ -430,7 +430,7 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
       resources {
         limits = {
           cpu    = "1"
-          memory = "1Gi"
+          memory = "2Gi"
         }
         cpu_idle          = true
         startup_cpu_boost = true
@@ -1334,6 +1334,66 @@ resource "google_cloud_run_v2_service_iam_member" "storefront_uniten_public" {
 }
 
 # =============================================================================
+# Admin — Breathe tenant admin
+# =============================================================================
+
+resource "google_cloud_run_v2_service" "admin_breathe" {
+  name     = "unifeed-admin"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+
+  template {
+    service_account = google_service_account.storefront.email
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/unifeed-storefront/admin-breathe:latest"
+      ports { container_port = 3000 }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      env {
+        name  = "API_URL"
+        value = "https://api.dev.unifeed.io"
+      }
+      env {
+        name  = "TENANT_CODE"
+        value = "breathe"
+      }
+    }
+
+    timeout = "60s"
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "admin_breathe_public" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.admin_breathe.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# =============================================================================
 # Load Balancer — routes custom domains to Cloud Run services
 # =============================================================================
 
@@ -1367,6 +1427,10 @@ module "dev_lb" {
       cloud_run_service = google_cloud_run_v2_service.storefront_uniten.name
       region            = var.region
     }
+    admin-breathe = {
+      cloud_run_service = google_cloud_run_v2_service.admin_breathe.name
+      region            = var.region
+    }
   }
 
   host_rules = {
@@ -1394,6 +1458,10 @@ module "dev_lb" {
       hosts   = ["uniten.dev.unifeed.io"]
       backend = "storefront-uniten"
     }
+    admin-breathe = {
+      hosts   = ["admin.dev.breathebranding.co.uk"]
+      backend = "admin-breathe"
+    }
   }
 
   default_backend = "unifeed-api"
@@ -1402,6 +1470,7 @@ module "dev_lb" {
     "api.dev.unifeed.io",
     "pa.dev.breathebranding.co.uk",
     "shop.dev.breathebranding.co.uk",
+    "admin.dev.breathebranding.co.uk",
     "dev.breathebranding.eu",
     "pa.dev.unifeed.io",
     "uniten.dev.unifeed.io",
@@ -1416,6 +1485,7 @@ resource "cloudflare_record" "dev_services" {
   for_each = {
     "pa.dev"    = "pa.dev"
     "shop.dev"  = "shop.dev"
+    "admin.dev" = "admin.dev"
   }
 
   zone_id = var.cloudflare_zone_id
