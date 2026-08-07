@@ -501,6 +501,16 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
         value = "dev@breathebranding.co.uk"
       }
 
+      # Tenant secret encryption (Cloud KMS)
+      env {
+        name  = "SECRETS_KMS_ENABLED"
+        value = "true"
+      }
+      env {
+        name  = "SECRETS_KMS_KEY"
+        value = "tenant-secrets-dev"
+      }
+
       # Supplier API credentials (for enrichment feed fetching)
       env {
         name  = "PRESELI_CLIENT_ID"
