@@ -213,6 +213,13 @@ resource "google_storage_bucket_iam_member" "backend_files" {
   member = "serviceAccount:${google_service_account.backend.email}"
 }
 
+# Backend SA needs to sign URLs for file downloads
+resource "google_project_iam_member" "backend_token_creator" {
+  project = var.project_id
+  role    = "roles/iam.serviceAccountTokenCreator"
+  member  = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # =============================================================================
 # IAM — Backend service account
 # =============================================================================
