@@ -195,6 +195,24 @@ resource "google_storage_bucket" "cost_pricing" {
   }
 }
 
+resource "google_storage_bucket" "files" {
+  project                     = var.project_id
+  name                        = "unifeed-${var.environment}-files"
+  location                    = var.region
+  uniform_bucket_level_access = true
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+}
+
+resource "google_storage_bucket_iam_member" "backend_files" {
+  bucket = google_storage_bucket.files.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # =============================================================================
 # IAM — Backend service account
 # =============================================================================
@@ -473,6 +491,10 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
       env {
         name  = "ZITADEL_ISSUER"
         value = var.unifeed_zitadel_issuer
+      }
+      env {
+        name  = "GCS_FILES_BUCKET"
+        value = google_storage_bucket.files.name
       }
       env {
         name = "WORKER_API_KEY"
