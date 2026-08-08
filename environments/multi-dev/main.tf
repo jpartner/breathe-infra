@@ -1373,11 +1373,21 @@ resource "google_cloud_run_v2_service_iam_member" "storefront_uniten_public" {
 }
 
 # =============================================================================
-# Admin — Breathe tenant admin
+# Admin panels — per-tenant admin deployments (same image, different TENANT_CODE)
 # =============================================================================
 
-resource "google_cloud_run_v2_service" "admin_breathe" {
-  name     = "unifeed-admin"
+locals {
+  admin_tenants = {
+    uniten  = "uniten"
+    breathe = "breathe"
+    pa      = "pa"
+  }
+}
+
+resource "google_cloud_run_v2_service" "admin" {
+  for_each = local.admin_tenants
+
+  name     = "admin-${each.key}"
   project  = var.project_id
   location = var.region
   ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
@@ -1391,7 +1401,7 @@ resource "google_cloud_run_v2_service" "admin_breathe" {
     }
 
     containers {
-      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/unifeed-storefront/admin-breathe:latest"
+      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/unifeed-storefront/admin:latest"
       ports { container_port = 3000 }
 
       resources {
@@ -1409,7 +1419,7 @@ resource "google_cloud_run_v2_service" "admin_breathe" {
       }
       env {
         name  = "TENANT_CODE"
-        value = "breathe"
+        value = each.value
       }
     }
 
@@ -1424,12 +1434,24 @@ resource "google_cloud_run_v2_service" "admin_breathe" {
   depends_on = [google_project_service.apis]
 }
 
-resource "google_cloud_run_v2_service_iam_member" "admin_breathe_public" {
+resource "google_cloud_run_v2_service_iam_member" "admin_public" {
+  for_each = local.admin_tenants
+
   project  = var.project_id
   location = var.region
-  name     = google_cloud_run_v2_service.admin_breathe.name
+  name     = google_cloud_run_v2_service.admin[each.key].name
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+
+moved {
+  from = google_cloud_run_v2_service.admin_breathe
+  to   = google_cloud_run_v2_service.admin["breathe"]
+}
+
+moved {
+  from = google_cloud_run_v2_service_iam_member.admin_breathe_public
+  to   = google_cloud_run_v2_service_iam_member.admin_public["breathe"]
 }
 
 # =============================================================================
@@ -1466,8 +1488,16 @@ module "dev_lb" {
       cloud_run_service = google_cloud_run_v2_service.storefront_uniten.name
       region            = var.region
     }
+    admin-uniten = {
+      cloud_run_service = google_cloud_run_v2_service.admin["uniten"].name
+      region            = var.region
+    }
     admin-breathe = {
-      cloud_run_service = google_cloud_run_v2_service.admin_breathe.name
+      cloud_run_service = google_cloud_run_v2_service.admin["breathe"].name
+      region            = var.region
+    }
+    admin-pa = {
+      cloud_run_service = google_cloud_run_v2_service.admin["pa"].name
       region            = var.region
     }
   }
@@ -1497,9 +1527,17 @@ module "dev_lb" {
       hosts   = ["uniten.dev.unifeed.io"]
       backend = "storefront-uniten"
     }
+    admin-uniten = {
+      hosts   = ["admin-uniten.dev.unifeed.io"]
+      backend = "admin-uniten"
+    }
     admin-breathe = {
       hosts   = ["admin.dev.breathebranding.co.uk"]
       backend = "admin-breathe"
+    }
+    admin-pa = {
+      hosts   = ["admin-pa.dev.unifeed.io"]
+      backend = "admin-pa"
     }
   }
 
@@ -1509,6 +1547,8 @@ module "dev_lb" {
     "api.dev.unifeed.io",
     "pa.dev.breathebranding.co.uk",
     "shop.dev.breathebranding.co.uk",
+    "admin-uniten.dev.unifeed.io",
+    "admin-pa.dev.unifeed.io",
     "admin.dev.breathebranding.co.uk",
     "dev.breathebranding.eu",
     "pa.dev.unifeed.io",
@@ -1540,9 +1580,11 @@ resource "cloudflare_record" "dev_unifeed" {
   provider = cloudflare.unifeed
 
   for_each = {
-    "api.dev"    = "api.dev"
-    "pa.dev"     = "pa.dev"
-    "uniten.dev" = "uniten.dev"
+    "api.dev"           = "api.dev"
+    "pa.dev"            = "pa.dev"
+    "uniten.dev"        = "uniten.dev"
+    "admin-uniten.dev"  = "admin-uniten.dev"
+    "admin-pa.dev"      = "admin-pa.dev"
   }
 
   zone_id = var.unifeed_cloudflare_zone_id
