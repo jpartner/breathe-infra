@@ -504,6 +504,10 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
         value = google_storage_bucket.files.name
       }
       env {
+        name  = "PDF_SERVICE_URL"
+        value = google_cloud_run_v2_service.unifeed_pdf.uri
+      }
+      env {
         name = "WORKER_API_KEY"
         value_source {
           secret_key_ref {
@@ -1370,6 +1374,49 @@ resource "google_cloud_run_v2_service_iam_member" "storefront_uniten_public" {
   name     = google_cloud_run_v2_service.storefront_uniten.name
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+
+# =============================================================================
+# PDF service — internal, headless Chrome PDF renderer
+# =============================================================================
+
+resource "google_cloud_run_v2_service" "unifeed_pdf" {
+  name     = "unifeed-pdf"
+  project  = var.project_id
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+
+  template {
+    service_account = google_service_account.storefront.email
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/unifeed-pdf/unifeed-pdf:latest"
+      ports { container_port = 8080 }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "1Gi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+    }
+
+    timeout = "60s"
+  }
+
+  labels = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+
+  depends_on = [google_project_service.apis]
 }
 
 # =============================================================================
