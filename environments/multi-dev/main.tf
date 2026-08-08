@@ -1444,16 +1444,6 @@ resource "google_cloud_run_v2_service_iam_member" "admin_public" {
   member   = "allUsers"
 }
 
-moved {
-  from = google_cloud_run_v2_service.admin_breathe
-  to   = google_cloud_run_v2_service.admin["breathe"]
-}
-
-moved {
-  from = google_cloud_run_v2_service_iam_member.admin_breathe_public
-  to   = google_cloud_run_v2_service_iam_member.admin_public["breathe"]
-}
-
 # =============================================================================
 # Load Balancer — routes custom domains to Cloud Run services
 # =============================================================================
