@@ -1645,8 +1645,12 @@ resource "cloudflare_record" "dev_breathe_eu" {
 }
 
 # =============================================================================
-# Cloud Tasks — email retry queue
+# Cloud Tasks
 # =============================================================================
+
+data "google_project" "current" {
+  project_id = var.project_id
+}
 
 resource "google_cloud_tasks_queue" "email_retry" {
   name     = "email-retry"
@@ -1658,6 +1662,21 @@ resource "google_cloud_tasks_queue" "email_retry" {
     min_backoff   = "300s"   # 5 minutes
     max_backoff   = "14400s" # 4 hours
     max_doublings = 3        # 5m → 10m → 20m → 40m → then linear to 4h
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_cloud_tasks_queue" "reminders" {
+  name     = "reminders"
+  location = var.region
+  project  = var.project_id
+
+  retry_config {
+    max_attempts  = 3
+    min_backoff   = "60s"
+    max_backoff   = "3600s"
+    max_doublings = 3
   }
 
   depends_on = [google_project_service.apis]
@@ -1677,4 +1696,43 @@ resource "google_cloud_run_v2_service_iam_member" "cloud_tasks_invoker" {
   name     = google_cloud_run_v2_service.unifeed_backend.name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.backend.email}"
+}
+
+# =============================================================================
+# Cloud Scheduler — retention cleanup
+# =============================================================================
+
+# Cloud Scheduler service agent needs to act as the backend SA for OIDC tokens
+resource "google_service_account_iam_member" "scheduler_act_as_backend" {
+  service_account_id = google_service_account.backend.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+}
+
+resource "google_cloud_scheduler_job" "notification_retention_cleanup" {
+  name        = "notification-retention-cleanup"
+  project     = var.project_id
+  region      = var.region
+  description = "Daily cleanup of dismissed/read admin notifications older than 90 days"
+  schedule    = "0 3 * * *"
+  time_zone   = "UTC"
+
+  http_target {
+    uri         = "${google_cloud_run_v2_service.unifeed_backend.uri}/internal/notifications/cleanup"
+    http_method = "POST"
+
+    oidc_token {
+      service_account_email = google_service_account.backend.email
+      audience              = google_cloud_run_v2_service.unifeed_backend.uri
+    }
+  }
+
+  retry_config {
+    retry_count = 1
+  }
+
+  depends_on = [
+    google_project_service.apis,
+    google_service_account_iam_member.scheduler_act_as_backend,
+  ]
 }
