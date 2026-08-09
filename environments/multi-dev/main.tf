@@ -1720,19 +1720,11 @@ resource "google_cloud_scheduler_job" "notification_retention_cleanup" {
   http_target {
     uri         = "${google_cloud_run_v2_service.unifeed_backend.uri}/internal/notifications/cleanup"
     http_method = "POST"
-
-    oidc_token {
-      service_account_email = google_service_account.backend.email
-      audience              = google_cloud_run_v2_service.unifeed_backend.uri
-    }
   }
 
   retry_config {
     retry_count = 1
   }
 
-  depends_on = [
-    google_project_service.apis,
-    google_service_account_iam_member.scheduler_act_as_backend,
-  ]
+  depends_on = [google_project_service.apis]
 }
