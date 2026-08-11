@@ -83,6 +83,12 @@ resource "google_secret_manager_secret_iam_member" "storefront_secrets" {
     "storefront-breathe-eu-auth-secret",
     "storefront-pa-auth-secret",
     "storefront-uniten-auth-secret",
+    # The admin UIs run under the same service account
+    "admin-breathe-auth-secret",
+    "admin-pa-auth-secret",
+    "admin-uniten-auth-secret",
+    # admin-pa's PA legacy lookup proxy authenticates to pa-migration
+    "pa-migration-api-key",
   ])
 
   project   = var.shared_project_id
@@ -1091,6 +1097,13 @@ resource "google_cloud_run_v2_service" "storefront_breathe" {
         name  = "TENANT_CODE"
         value = "breathe"
       }
+      # NextAuth derives the OIDC redirect_uri from this. Without it it uses the
+      # container bind address and sends Zitadel https://0.0.0.0:3000/..., which
+      # the browser cannot load after login.
+      env {
+        name  = "AUTH_URL"
+        value = "https://shop.dev.breathebranding.co.uk"
+      }
       env {
         name  = "AUTH_ZITADEL_ISSUER"
         value = var.unifeed_zitadel_issuer
@@ -1172,6 +1185,13 @@ resource "google_cloud_run_v2_service" "storefront_breathe_eu" {
         name  = "TENANT_CODE"
         value = "breathe-eu"
       }
+      # NextAuth derives the OIDC redirect_uri from this. Without it it uses the
+      # container bind address and sends Zitadel https://0.0.0.0:3000/..., which
+      # the browser cannot load after login.
+      env {
+        name  = "AUTH_URL"
+        value = "https://dev.breathebranding.eu"
+      }
       env {
         name  = "AUTH_ZITADEL_ISSUER"
         value = var.unifeed_zitadel_issuer
@@ -1252,6 +1272,13 @@ resource "google_cloud_run_v2_service" "storefront_pa" {
       env {
         name  = "TENANT_CODE"
         value = "pa"
+      }
+      # NextAuth derives the OIDC redirect_uri from this. Without it it uses the
+      # container bind address and sends Zitadel https://0.0.0.0:3000/..., which
+      # the browser cannot load after login.
+      env {
+        name  = "AUTH_URL"
+        value = "https://pa.dev.unifeed.io"
       }
       env {
         name  = "AUTH_ZITADEL_ISSUER"
@@ -1338,6 +1365,13 @@ resource "google_cloud_run_v2_service" "storefront_uniten" {
         name  = "TENANT_CODE"
         value = "uniten"
       }
+      # NextAuth derives the OIDC redirect_uri from this. Without it it uses the
+      # container bind address and sends Zitadel https://0.0.0.0:3000/..., which
+      # the browser cannot load after login.
+      env {
+        name  = "AUTH_URL"
+        value = "https://uniten.dev.unifeed.io"
+      }
       env {
         name  = "AUTH_ZITADEL_ISSUER"
         value = var.unifeed_zitadel_issuer
@@ -1384,7 +1418,12 @@ resource "google_cloud_run_v2_service" "unifeed_pdf" {
   name     = "unifeed-pdf"
   project  = var.project_id
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  # The backend calls this over the public URL — its VPC egress is
+  # private-ranges-only, so an internal-only service is unreachable and every
+  # render fails. Access is restricted by IAM instead: only sa-backend holds
+  # run.invoker (see below) and the backend presents a Cloud Run ID token.
+  # Do not add allUsers here; that turns it into a public HTML-to-PDF renderer.
+  ingress = "INGRESS_TRAFFIC_ALL"
 
   template {
     service_account = google_service_account.storefront.email
@@ -1429,6 +1468,13 @@ locals {
     breathe = "breathe"
     pa      = "pa"
   }
+
+  # Zitadel admin UI OIDC clients, keyed by admin deployment slug
+  admin_client_ids = {
+    uniten  = var.admin_uniten_client_id
+    breathe = var.admin_breathe_client_id
+    pa      = var.admin_pa_client_id
+  }
 }
 
 resource "google_cloud_run_v2_service" "admin" {
@@ -1438,6 +1484,15 @@ resource "google_cloud_run_v2_service" "admin" {
   project  = var.project_id
   location = var.region
   ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+
+  # CI deploys pinned commit-sha images; Terraform must not repoint to :latest
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].labels,
+      labels,
+    ]
+  }
 
   template {
     service_account = google_service_account.storefront.email
@@ -1468,6 +1523,54 @@ resource "google_cloud_run_v2_service" "admin" {
         name  = "TENANT_CODE"
         value = each.value
       }
+      # NextAuth builds the OIDC redirect_uri from this. Without it, it derives
+      # the origin from the container's own bind address and sends Zitadel
+      # https://0.0.0.0:3000/api/auth/callback/zitadel, which the browser cannot
+      # load after login.
+      env {
+        name  = "AUTH_URL"
+        value = "https://admin-${each.key}.dev.unifeed.io"
+      }
+      env {
+        name  = "AUTH_ZITADEL_ISSUER"
+        value = var.unifeed_zitadel_issuer
+      }
+      env {
+        name  = "AUTH_ZITADEL_ID"
+        value = local.admin_client_ids[each.key]
+      }
+      env {
+        name = "AUTH_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/admin-${each.key}-auth-secret"
+            version = "latest"
+          }
+        }
+      }
+
+      # PA legacy lookup (PA tenant only): the admin app's /api/pa-legacy proxy
+      # serves a read-only window into pre-Unifeed order history. Other tenants
+      # get neither the env nor the panel — absence of PA_LEGACY_URL disables it.
+      dynamic "env" {
+        for_each = each.key == "pa" ? [1] : []
+        content {
+          name  = "PA_LEGACY_URL"
+          value = google_cloud_run_v2_service.pa_migration.uri
+        }
+      }
+      dynamic "env" {
+        for_each = each.key == "pa" ? [1] : []
+        content {
+          name = "PA_LEGACY_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = "projects/${var.shared_project_id}/secrets/pa-migration-api-key"
+              version = "latest"
+            }
+          }
+        }
+      }
     }
 
     timeout = "60s"
@@ -1479,6 +1582,16 @@ resource "google_cloud_run_v2_service" "admin" {
   }
 
   depends_on = [google_project_service.apis]
+}
+
+# Only the backend may invoke the PDF renderer. Deliberately not allUsers:
+# the service renders arbitrary HTML, so a public invoker is an SSRF vector.
+resource "google_cloud_run_v2_service_iam_member" "pdf_backend_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.unifeed_pdf.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.backend.email}"
 }
 
 resource "google_cloud_run_v2_service_iam_member" "admin_public" {
@@ -1617,11 +1730,11 @@ resource "cloudflare_record" "dev_unifeed" {
   provider = cloudflare.unifeed
 
   for_each = {
-    "api.dev"           = "api.dev"
-    "pa.dev"            = "pa.dev"
-    "uniten.dev"        = "uniten.dev"
-    "admin-uniten.dev"  = "admin-uniten.dev"
-    "admin-pa.dev"      = "admin-pa.dev"
+    "api.dev"          = "api.dev"
+    "pa.dev"           = "pa.dev"
+    "uniten.dev"       = "uniten.dev"
+    "admin-uniten.dev" = "admin-uniten.dev"
+    "admin-pa.dev"     = "admin-pa.dev"
   }
 
   zone_id = var.unifeed_cloudflare_zone_id
