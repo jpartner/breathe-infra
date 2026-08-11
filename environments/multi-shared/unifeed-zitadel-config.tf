@@ -212,6 +212,35 @@ resource "zitadel_personal_access_token" "test_norole" {
   user_id = zitadel_machine_user.test_norole[0].id
 }
 
+resource "zitadel_machine_user" "test_csr" {
+  count    = var.unifeed_zitadel_manage_config ? 1 : 0
+  provider = zitadel.unifeed
+
+  org_id            = module.unifeed_zitadel_config[0].org_ids["unifeed"]
+  user_name         = "e2e-test-csr"
+  name              = "E2E Test CSR"
+  description       = "Machine user for API tests — csr role (customer operations, no platform config)"
+  access_token_type = "ACCESS_TOKEN_TYPE_JWT"
+}
+
+resource "zitadel_personal_access_token" "test_csr" {
+  count    = var.unifeed_zitadel_manage_config ? 1 : 0
+  provider = zitadel.unifeed
+
+  org_id  = module.unifeed_zitadel_config[0].org_ids["unifeed"]
+  user_id = zitadel_machine_user.test_csr[0].id
+}
+
+resource "zitadel_user_grant" "test_csr" {
+  count    = var.unifeed_zitadel_manage_config ? 1 : 0
+  provider = zitadel.unifeed
+
+  org_id     = module.unifeed_zitadel_config[0].org_ids["unifeed"]
+  project_id = module.unifeed_zitadel_config[0].project_ids["unifeed-dev"]
+  user_id    = zitadel_machine_user.test_csr[0].id
+  role_keys  = ["csr"]
+}
+
 # -- Human user (for UI login tests via Playwright) --
 
 resource "zitadel_human_user" "test_login" {
@@ -242,7 +271,7 @@ resource "zitadel_user_grant" "test_login" {
 # -- Store PATs and test credentials in Secret Manager --
 
 resource "google_secret_manager_secret" "test_pats" {
-  for_each = var.unifeed_zitadel_manage_config ? toset(["admin", "customer", "norole"]) : toset([])
+  for_each = var.unifeed_zitadel_manage_config ? toset(["admin", "customer", "norole", "csr"]) : toset([])
 
   project   = var.project_id
   secret_id = "unifeed-test-${each.key}-pat"
@@ -267,6 +296,12 @@ resource "google_secret_manager_secret_version" "test_norole_pat" {
   count       = var.unifeed_zitadel_manage_config ? 1 : 0
   secret      = google_secret_manager_secret.test_pats["norole"].id
   secret_data = zitadel_personal_access_token.test_norole[0].token
+}
+
+resource "google_secret_manager_secret_version" "test_csr_pat" {
+  count       = var.unifeed_zitadel_manage_config ? 1 : 0
+  secret      = google_secret_manager_secret.test_pats["csr"].id
+  secret_data = zitadel_personal_access_token.test_csr[0].token
 }
 
 resource "google_secret_manager_secret" "test_login_password" {

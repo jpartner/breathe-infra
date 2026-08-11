@@ -441,7 +441,7 @@ resource "google_project_iam_member" "test_runner_sql" {
 
 # Test runner needs to read test user PATs and login password
 resource "google_secret_manager_secret_iam_member" "test_runner_pats" {
-  for_each  = var.unifeed_zitadel_manage_config ? toset(["admin", "customer", "norole"]) : toset([])
+  for_each  = var.unifeed_zitadel_manage_config ? toset(["admin", "customer", "norole", "csr"]) : toset([])
 
   project   = var.project_id
   secret_id = google_secret_manager_secret.test_pats[each.key].secret_id
@@ -641,6 +641,22 @@ resource "google_cloud_run_v2_service" "unifeed_test_runner" {
           value_source {
             secret_key_ref {
               secret  = google_secret_manager_secret.test_pats["norole"].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      env {
+        name  = "ADMIN_URL"
+        value = "https://admin-uniten.dev.unifeed.io"
+      }
+      dynamic "env" {
+        for_each = var.unifeed_zitadel_manage_config ? [1] : []
+        content {
+          name = "TEST_CSR_PAT"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.test_pats["csr"].secret_id
               version = "latest"
             }
           }
