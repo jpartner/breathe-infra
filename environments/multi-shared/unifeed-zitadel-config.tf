@@ -241,6 +241,55 @@ resource "zitadel_user_grant" "test_csr" {
   role_keys  = ["csr"]
 }
 
+# -- Staff manager service account --
+# The backend manages tenant staff (invite, roles, deactivate) through the
+# Zitadel management API as this machine user — tenants never see the Zitadel
+# console. ORG_USER_MANAGER in every tenant org, PAT in Secret Manager.
+
+resource "zitadel_machine_user" "staff_manager" {
+  count    = var.unifeed_zitadel_manage_config ? 1 : 0
+  provider = zitadel.unifeed
+
+  org_id            = module.unifeed_zitadel_config[0].org_ids["unifeed"]
+  user_name         = "staff-manager"
+  name              = "Staff Manager Service"
+  description       = "Backend service account for tenant staff management"
+  access_token_type = "ACCESS_TOKEN_TYPE_BEARER"
+}
+
+resource "zitadel_personal_access_token" "staff_manager" {
+  count    = var.unifeed_zitadel_manage_config ? 1 : 0
+  provider = zitadel.unifeed
+
+  org_id  = module.unifeed_zitadel_config[0].org_ids["unifeed"]
+  user_id = zitadel_machine_user.staff_manager[0].id
+}
+
+resource "zitadel_org_member" "staff_manager" {
+  for_each = var.unifeed_zitadel_manage_config ? module.unifeed_zitadel_config[0].org_ids : {}
+  provider = zitadel.unifeed
+
+  org_id  = each.value
+  user_id = zitadel_machine_user.staff_manager[0].id
+  roles   = ["ORG_USER_MANAGER"]
+}
+
+resource "google_secret_manager_secret" "staff_manager_pat" {
+  count = var.unifeed_zitadel_manage_config ? 1 : 0
+
+  project   = var.project_id
+  secret_id = "unifeed-staff-manager-pat"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "staff_manager_pat" {
+  count       = var.unifeed_zitadel_manage_config ? 1 : 0
+  secret      = google_secret_manager_secret.staff_manager_pat[0].id
+  secret_data = zitadel_personal_access_token.staff_manager[0].token
+}
+
 # -- Human user (for UI login tests via Playwright) --
 
 resource "zitadel_human_user" "test_login" {

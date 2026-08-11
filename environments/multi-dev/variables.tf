@@ -152,3 +152,23 @@ variable "breathe_sql_connection_name" {
   type        = string
   default     = "breathe-dev:europe-west2:breathe-branding"
 }
+
+variable "zitadel_org_map" {
+  description = "Unifeed tenant code -> Zitadel organisation id"
+  type        = map(string)
+  default = {
+    uniten  = "384307974325186060"
+    breathe = "384307372207681036"
+    pa      = "384307372308344332"
+  }
+}
+
+variable "zitadel_project_map" {
+  description = "Unifeed tenant code -> Zitadel project id (this environment)"
+  type        = map(string)
+  default = {
+    uniten  = "384307979559677452"
+    breathe = "384307378247478796"
+    pa      = "384307378314587660"
+  }
+}

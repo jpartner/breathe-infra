@@ -457,6 +457,13 @@ resource "google_cloud_run_v2_service" "pa_migration" {
   depends_on = [google_project_service.apis]
 }
 
+resource "google_secret_manager_secret_iam_member" "backend_staff_manager_pat" {
+  project   = var.shared_project_id
+  secret_id = "unifeed-staff-manager-pat"
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # The lookup service reads the live Breathe DB (read-only SELECTs)
 resource "google_project_iam_member" "pa_migration_breathe_sql" {
   project = var.breathe_live_project_id
@@ -554,6 +561,26 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
       env {
         name  = "ZITADEL_ISSUER"
         value = var.unifeed_zitadel_issuer
+      }
+
+      # Staff management (plans/staff-management.md): the backend manages
+      # tenant staff via the Zitadel API as the staff-manager service account
+      env {
+        name = "STAFF_MANAGER_PAT"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/unifeed-staff-manager-pat"
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name  = "ZITADEL_ORG_MAP"
+        value = jsonencode(var.zitadel_org_map)
+      }
+      env {
+        name  = "ZITADEL_PROJECT_MAP"
+        value = jsonencode(var.zitadel_project_map)
       }
       env {
         name  = "GCS_FILES_BUCKET"
