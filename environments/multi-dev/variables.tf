@@ -76,6 +76,26 @@ variable "storefront_uniten_client_id" {
   default     = "384307981908553228"
 }
 
+# Admin UI OIDC client IDs — from the unifeed_admin_client_ids output of
+# multi-shared. Refresh these if that apply replaces the admin applications.
+variable "admin_breathe_client_id" {
+  description = "Zitadel admin UI OIDC client ID for Breathe (dev)"
+  type        = string
+  default     = "384307387441458700"
+}
+
+variable "admin_pa_client_id" {
+  description = "Zitadel admin UI OIDC client ID for PA (dev)"
+  type        = string
+  default     = "384307386954919436"
+}
+
+variable "admin_uniten_client_id" {
+  description = "Zitadel admin UI OIDC client ID for Uniten (dev)"
+  type        = string
+  default     = "384307985482100236"
+}
+
 # Cloudflare
 variable "cloudflare_api_token" {
   description = "Cloudflare API token with Zone:DNS:Edit for breathebranding.co.uk"
@@ -119,4 +139,16 @@ variable "typesense_host" {
   description = "Typesense Cloud host"
   type        = string
   default     = "c7op2qkelxuh81n3p-1.a1.typesense.net"
+}
+
+variable "breathe_live_project_id" {
+  description = "Project running the live (pre-Unifeed) Breathe system"
+  type        = string
+  default     = "breathe-dev"
+}
+
+variable "breathe_sql_connection_name" {
+  description = "Cloud SQL connection name of the live Breathe database"
+  type        = string
+  default     = "breathe-dev:europe-west2:breathe-branding"
 }

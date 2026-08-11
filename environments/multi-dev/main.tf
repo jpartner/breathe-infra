@@ -391,6 +391,22 @@ resource "google_cloud_run_v2_service" "pa_migration" {
         }
       }
 
+      # Breathe legacy source: read-only lookups against the live Breathe
+      # Postgres over the Cloud SQL socket, served under /breathe
+      env {
+        name  = "BREATHE_SQL_INSTANCE"
+        value = var.breathe_sql_connection_name
+      }
+      env {
+        name  = "BREATHE_DB_NAME"
+        value = "breathe_prod"
+      }
+
+      volume_mounts {
+        name       = "cloudsql"
+        mount_path = "/cloudsql"
+      }
+
       startup_probe {
         http_get {
           path = "/health"
@@ -403,6 +419,13 @@ resource "google_cloud_run_v2_service" "pa_migration" {
       }
     }
 
+    volumes {
+      name = "cloudsql"
+      cloud_sql_instance {
+        instances = [var.breathe_sql_connection_name]
+      }
+    }
+
     timeout = "60s"
   }
 
@@ -412,6 +435,13 @@ resource "google_cloud_run_v2_service" "pa_migration" {
   }
 
   depends_on = [google_project_service.apis]
+}
+
+# The lookup service reads the live Breathe DB (read-only SELECTs)
+resource "google_project_iam_member" "pa_migration_breathe_sql" {
+  project = var.breathe_live_project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.pa_migration.email}"
 }
 
 resource "google_cloud_run_v2_service_iam_member" "pa_migration_public" {
@@ -1477,6 +1507,13 @@ locals {
   }
 }
 
+locals {
+  legacy_lookup_urls = {
+    pa      = google_cloud_run_v2_service.pa_migration.uri
+    breathe = "${google_cloud_run_v2_service.pa_migration.uri}/breathe"
+  }
+}
+
 resource "google_cloud_run_v2_service" "admin" {
   for_each = local.admin_tenants
 
@@ -1549,20 +1586,20 @@ resource "google_cloud_run_v2_service" "admin" {
         }
       }
 
-      # PA legacy lookup (PA tenant only): the admin app's /api/pa-legacy proxy
-      # serves a read-only window into pre-Unifeed order history. Other tenants
-      # get neither the env nor the panel — absence of PA_LEGACY_URL disables it.
+      # Legacy lookup (per tenant): a read-only window into that tenant's
+      # pre-Unifeed history. PA reads the frozen dump; Breathe reads the live
+      # Breathe DB via the /breathe prefix. No entry → no env → no panel.
       dynamic "env" {
-        for_each = each.key == "pa" ? [1] : []
+        for_each = contains(keys(local.legacy_lookup_urls), each.key) ? [1] : []
         content {
-          name  = "PA_LEGACY_URL"
-          value = google_cloud_run_v2_service.pa_migration.uri
+          name  = "LEGACY_LOOKUP_URL"
+          value = local.legacy_lookup_urls[each.key]
         }
       }
       dynamic "env" {
-        for_each = each.key == "pa" ? [1] : []
+        for_each = contains(keys(local.legacy_lookup_urls), each.key) ? [1] : []
         content {
-          name = "PA_LEGACY_API_KEY"
+          name = "LEGACY_LOOKUP_API_KEY"
           value_source {
             secret_key_ref {
               secret  = "projects/${var.shared_project_id}/secrets/pa-migration-api-key"
