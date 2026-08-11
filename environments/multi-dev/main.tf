@@ -345,6 +345,13 @@ resource "google_secret_manager_secret_iam_member" "pa_migration_api_key" {
   member    = "serviceAccount:${google_service_account.pa_migration.email}"
 }
 
+resource "google_secret_manager_secret_iam_member" "pa_migration_breathe_db_password" {
+  project   = var.shared_project_id
+  secret_id = "breathe-legacy-db-password"
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.pa_migration.email}"
+}
+
 resource "google_cloud_run_v2_service" "pa_migration" {
   name     = "pa-migration"
   project  = var.project_id
@@ -400,6 +407,19 @@ resource "google_cloud_run_v2_service" "pa_migration" {
       env {
         name  = "BREATHE_DB_NAME"
         value = "breathe_prod"
+      }
+      env {
+        name  = "BREATHE_DB_USER"
+        value = "legacy_lookup"   # read-only role: SELECT only, created 2026-08-11
+      }
+      env {
+        name = "BREATHE_DB_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = "projects/${var.shared_project_id}/secrets/breathe-legacy-db-password"
+            version = "latest"
+          }
+        }
       }
 
       volume_mounts {
