@@ -31,3 +31,9 @@ output "unifeed_customer_client_ids" {
   value       = var.unifeed_zitadel_manage_config ? module.unifeed_zitadel_config[0].customer_client_ids : {}
   sensitive   = true
 }
+
+output "unifeed_admin_client_ids" {
+  description = "Zitadel admin UI OIDC client IDs per tenant-env, for the admin_*_client_id vars in multi-dev"
+  value       = var.unifeed_zitadel_manage_config ? module.unifeed_zitadel_config[0].admin_client_ids : {}
+  sensitive   = true
+}

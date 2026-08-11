@@ -56,6 +56,13 @@ terraform plan
 terraform apply
 ```
 
+> **Read [docs/zitadel-and-terraform-variables.md](docs/zitadel-and-terraform-variables.md) before applying `multi-shared`.**
+> `terraform.tfvars` is gitignored, and the Zitadel resources are gated behind a
+> flag — an apply that omits it plans to destroy 75 identity resources including
+> production. That doc also covers which of the two near-identical `zitadel_*` /
+> `unifeed_zitadel_*` variable sets is live, and the two-phase client-ID dance
+> between `multi-shared` and `multi-dev`.
+
 ## Multi-Tenancy
 
 Tenancy is managed at the application layer, not infrastructure. All tenants share:
@@ -71,6 +78,12 @@ in the database, not in environment variables.
 Self-hosted Zitadel runs on Cloud Run in the shared project. Each tenant is a
 Zitadel Organization. New environments use Zitadel; the existing `breathe-dev`
 project continues using Auth0 unchanged.
+
+Zitadel runs as the `unifeed-zitadel` Cloud Run service in `breathe-shared`,
+served at `auth.unifeed.io`, with Breathe, PA and Unifeed as Organizations
+within it. Note there are two similarly-named variable sets — `unifeed_zitadel_*`
+drives the provider and module that manage the orgs, projects and OIDC apps. See
+[docs/zitadel-and-terraform-variables.md](docs/zitadel-and-terraform-variables.md).
 
 ## Important
 

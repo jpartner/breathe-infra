@@ -49,7 +49,13 @@ variable "unifeed_zitadel_key_path" {
 variable "unifeed_zitadel_manage_config" {
   description = "Whether to manage Unifeed Zitadel orgs/projects/apps"
   type        = bool
-  default     = false
+  # Defaults to true because these resources exist and are managed: state holds
+  # 75 of them, including production orgs/projects/OIDC apps and the e2e machine
+  # users and PATs. With a false default, an apply that forgot to pass this flag
+  # planned to destroy every one of them. Set false explicitly only when
+  # bootstrapping an environment whose Zitadel does not exist yet.
+  # See docs/zitadel-and-terraform-variables.md
+  default = true
 }
 
 variable "unifeed_cloudflare_zone_id" {
