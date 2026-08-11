@@ -33,7 +33,7 @@ locals {
         org_id       = zitadel_org.tenants[tenant_key].id
         display_name = "${tenant.display_name} (${env.display_name})"
         api_domain   = env.api_domain
-        admin_domain = env.admin_domain
+        admin_host   = lookup(tenant.admin_hosts, env_key, replace(env.admin_domain_pattern, "{tenant}", coalesce(tenant.admin_slug, tenant_key)))
         ops_domain   = env.ops_domain
         app_domains  = lookup(tenant.domains, env_key, [])
       }
@@ -74,19 +74,23 @@ resource "zitadel_application_oidc" "admin" {
   project_id = zitadel_project.envs[each.key].id
   name       = "Admin UI"
 
+  # NextAuth completes the OIDC handshake at /api/auth/callback/zitadel — a bare
+  # origin here makes Zitadel reject the callback.
   redirect_uris = [
-    "https://${each.value.admin_domain}",
-    "http://localhost:3001",
+    "https://${each.value.admin_host}/api/auth/callback/zitadel",
+    "http://localhost:3001/api/auth/callback/zitadel",
   ]
 
   post_logout_redirect_uris = [
-    "https://${each.value.admin_domain}",
+    "https://${each.value.admin_host}",
     "http://localhost:3001",
   ]
 
-  response_types              = ["OIDC_RESPONSE_TYPE_CODE"]
-  grant_types                 = ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"]
-  app_type                    = "OIDC_APP_TYPE_USER_AGENT"
+  response_types = ["OIDC_RESPONSE_TYPE_CODE"]
+  grant_types    = ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE", "OIDC_GRANT_TYPE_REFRESH_TOKEN"]
+  # The admin UI runs server-side under Next.js, like the customer app — it is a
+  # web client using PKCE, not a browser-only user-agent app.
+  app_type                    = "OIDC_APP_TYPE_WEB"
   auth_method_type            = "OIDC_AUTH_METHOD_TYPE_NONE"
   access_token_type           = "OIDC_TOKEN_TYPE_JWT"
   id_token_role_assertion     = true

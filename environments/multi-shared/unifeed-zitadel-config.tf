@@ -10,8 +10,8 @@ provider "zitadel" {
 }
 
 module "unifeed_zitadel_config" {
-  count    = var.unifeed_zitadel_manage_config ? 1 : 0
-  source   = "../../modules/zitadel-config"
+  count  = var.unifeed_zitadel_manage_config ? 1 : 0
+  source = "../../modules/zitadel-config"
 
   providers = {
     zitadel = zitadel.unifeed
@@ -20,6 +20,8 @@ module "unifeed_zitadel_config" {
   tenants = {
     unifeed = {
       display_name = "Unifeed"
+      # Admin UI for this tenant deploys as admin-uniten, not admin-unifeed.
+      admin_slug = "uniten"
       domains = {
         dev     = ["dev.unifeed.io", "uniten.dev.unifeed.io"]
         staging = ["staging.unifeed.io"]
@@ -28,6 +30,12 @@ module "unifeed_zitadel_config" {
     }
     breathe = {
       display_name = "Breathe Branding"
+      # Breathe's admin UI lives on the breathebranding domain, matching the
+      # dev LB host rule — the admin-{tenant}.dev.unifeed.io pattern has no
+      # route for it (login was broken until this override).
+      admin_hosts = {
+        dev = "admin.dev.breathebranding.co.uk"
+      }
       domains = {
         dev     = ["dev.breathebranding.co.uk"]
         staging = ["staging.breathebranding.co.uk"]
@@ -46,22 +54,22 @@ module "unifeed_zitadel_config" {
 
   environments = {
     dev = {
-      display_name = "Development"
-      api_domain   = "api.dev.unifeed.io"
-      admin_domain = "admin.dev.unifeed.io"
-      ops_domain   = "ops.dev.unifeed.io"
+      display_name         = "Development"
+      api_domain           = "api.dev.unifeed.io"
+      admin_domain_pattern = "admin-{tenant}.dev.unifeed.io"
+      ops_domain           = "ops.dev.unifeed.io"
     }
     staging = {
-      display_name = "Staging"
-      api_domain   = "api.staging.unifeed.io"
-      admin_domain = "admin.staging.unifeed.io"
-      ops_domain   = "ops.staging.unifeed.io"
+      display_name         = "Staging"
+      api_domain           = "api.staging.unifeed.io"
+      admin_domain_pattern = "admin-{tenant}.staging.unifeed.io"
+      ops_domain           = "ops.staging.unifeed.io"
     }
     prod = {
-      display_name = "Production"
-      api_domain   = "api.unifeed.io"
-      admin_domain = "admin.unifeed.io"
-      ops_domain   = "ops.unifeed.io"
+      display_name         = "Production"
+      api_domain           = "api.unifeed.io"
+      admin_domain_pattern = "admin-{tenant}.unifeed.io"
+      ops_domain           = "ops.unifeed.io"
     }
   }
 }
@@ -79,7 +87,7 @@ resource "random_password" "storefront_auth_secret" {
 }
 
 resource "google_secret_manager_secret" "storefront_auth_secret" {
-  for_each  = random_password.storefront_auth_secret
+  for_each = random_password.storefront_auth_secret
 
   project   = var.project_id
   secret_id = "storefront-${each.key}-auth-secret"
@@ -89,10 +97,35 @@ resource "google_secret_manager_secret" "storefront_auth_secret" {
 }
 
 resource "google_secret_manager_secret_version" "storefront_auth_secret" {
-  for_each    = google_secret_manager_secret.storefront_auth_secret
+  for_each = google_secret_manager_secret.storefront_auth_secret
 
   secret      = each.value.id
   secret_data = random_password.storefront_auth_secret[each.key].result
+}
+
+# NextAuth secret for each admin UI. Keyed by the admin deployment slug
+# (admin-uniten, admin-breathe, admin-pa), not the Zitadel tenant key.
+resource "random_password" "admin_auth_secret" {
+  for_each = toset(["breathe", "pa", "uniten"])
+  length   = 32
+  special  = false
+}
+
+resource "google_secret_manager_secret" "admin_auth_secret" {
+  for_each = random_password.admin_auth_secret
+
+  project   = var.project_id
+  secret_id = "admin-${each.key}-auth-secret"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "admin_auth_secret" {
+  for_each = google_secret_manager_secret.admin_auth_secret
+
+  secret      = each.value.id
+  secret_data = random_password.admin_auth_secret[each.key].result
 }
 
 # =============================================================================
@@ -110,7 +143,7 @@ resource "zitadel_machine_user" "test_admin" {
   user_name         = "e2e-test-admin"
   name              = "E2E Test Admin"
   description       = "Machine user for API tests — admin role"
-  access_token_type = "ACCESS_TOKEN_TYPE_BEARER"
+  access_token_type = "ACCESS_TOKEN_TYPE_JWT"
 }
 
 resource "zitadel_personal_access_token" "test_admin" {
@@ -139,7 +172,7 @@ resource "zitadel_machine_user" "test_customer" {
   user_name         = "e2e-test-customer"
   name              = "E2E Test Customer"
   description       = "Machine user for API tests — customer role"
-  access_token_type = "ACCESS_TOKEN_TYPE_BEARER"
+  access_token_type = "ACCESS_TOKEN_TYPE_JWT"
 }
 
 resource "zitadel_personal_access_token" "test_customer" {
@@ -168,7 +201,7 @@ resource "zitadel_machine_user" "test_norole" {
   user_name         = "e2e-test-norole"
   name              = "E2E Test No Role"
   description       = "Machine user for API tests — no role granted"
-  access_token_type = "ACCESS_TOKEN_TYPE_BEARER"
+  access_token_type = "ACCESS_TOKEN_TYPE_JWT"
 }
 
 resource "zitadel_personal_access_token" "test_norole" {
@@ -185,11 +218,11 @@ resource "zitadel_human_user" "test_login" {
   count    = var.unifeed_zitadel_manage_config ? 1 : 0
   provider = zitadel.unifeed
 
-  org_id     = module.unifeed_zitadel_config[0].org_ids["unifeed"]
-  user_name  = "e2e-test-login"
-  first_name = "Test"
-  last_name  = "User"
-  email      = "e2e-test@unifeed.io"
+  org_id            = module.unifeed_zitadel_config[0].org_ids["unifeed"]
+  user_name         = "e2e-test-login"
+  first_name        = "Test"
+  last_name         = "User"
+  email             = "e2e-test@unifeed.io"
   is_email_verified = true
 
   initial_password             = var.unifeed_test_user_password
@@ -209,7 +242,7 @@ resource "zitadel_user_grant" "test_login" {
 # -- Store PATs and test credentials in Secret Manager --
 
 resource "google_secret_manager_secret" "test_pats" {
-  for_each  = var.unifeed_zitadel_manage_config ? toset(["admin", "customer", "norole"]) : toset([])
+  for_each = var.unifeed_zitadel_manage_config ? toset(["admin", "customer", "norole"]) : toset([])
 
   project   = var.project_id
   secret_id = "unifeed-test-${each.key}-pat"
@@ -237,7 +270,7 @@ resource "google_secret_manager_secret_version" "test_norole_pat" {
 }
 
 resource "google_secret_manager_secret" "test_login_password" {
-  count     = var.unifeed_zitadel_manage_config ? 1 : 0
+  count = var.unifeed_zitadel_manage_config ? 1 : 0
 
   project   = var.project_id
   secret_id = "unifeed-test-login-password"

@@ -1528,6 +1528,14 @@ locals {
 }
 
 locals {
+  # Public host per admin deployment — must match the LB host rules; the
+  # breathe admin lives on the breathebranding domain, not dev.unifeed.io
+  admin_hosts = {
+    uniten  = "admin-uniten.dev.unifeed.io"
+    pa      = "admin-pa.dev.unifeed.io"
+    breathe = "admin.dev.breathebranding.co.uk"
+  }
+
   legacy_lookup_urls = {
     pa      = google_cloud_run_v2_service.pa_migration.uri
     breathe = "${google_cloud_run_v2_service.pa_migration.uri}/breathe"
@@ -1586,7 +1594,7 @@ resource "google_cloud_run_v2_service" "admin" {
       # load after login.
       env {
         name  = "AUTH_URL"
-        value = "https://admin-${each.key}.dev.unifeed.io"
+        value = "https://${local.admin_hosts[each.key]}"
       }
       env {
         name  = "AUTH_ZITADEL_ISSUER"
