@@ -149,9 +149,13 @@ The Zitadel tenant key and the Cloud Run deployment name do not always match:
 | `breathe` | `admin-breathe` | `admin.dev.breathebranding.co.uk` — its own brand domain |
 | `pa` | `admin-pa` | `admin-pa.dev.unifeed.io` |
 
-Breathe's admin moved to a branded host; `admin-breathe.dev.unifeed.io` has no
-DNS record at all. Its `AUTH_URL` and Zitadel redirect URIs both use the branded
-domain, which is what matters — they must agree, whatever the host is.
+Breathe's admin is served on its own brand domain, so no
+`admin-breathe.dev.unifeed.io` record was ever created — that absence is by
+design, not a gap. DNS for unifeed.io is healthy and lives in its own Cloudflare
+zone (`unifeed_cloudflare_zone_id`, with its own API token), separate from the
+breathebranding.co.uk and breathebranding.eu zones; each brand's hostnames are
+managed in its own zone. What matters per app is that its `AUTH_URL` and its
+Zitadel redirect URIs name the same host — whichever brand domain that is.
 
 That is why `var.tenants` carries an optional `admin_slug`. Deriving the admin
 hostname from the tenant key alone yields `admin-unifeed...`, which does not
