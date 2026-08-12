@@ -362,7 +362,8 @@ resource "zitadel_user_grant" "test_login" {
 locals {
   test_staff_logins = {
     admin = { email = "e2e-admin@unifeed.io", role = "admin" }
-    csr   = { email = "e2e-csr@unifeed.io", role = "csr" }
+    csr      = { email = "e2e-csr@unifeed.io", role = "csr" }
+    designer = { email = "e2e-designer@unifeed.io", role = "designer" }
   }
 }
 

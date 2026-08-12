@@ -38,6 +38,7 @@ variable "roles" {
   default = [
     { key = "admin", display_name = "Administrator", group = "staff" },
     { key = "csr", display_name = "Customer Service", group = "staff" },
+    { key = "designer", display_name = "Graphic Designer", group = "staff" },
     { key = "customer", display_name = "Customer", group = "customers" },
   ]
 }

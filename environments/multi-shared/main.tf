@@ -658,6 +658,10 @@ resource "google_cloud_run_v2_service" "unifeed_test_runner" {
         name  = "TEST_CSR_LOGIN_EMAIL"
         value = "e2e-csr@unifeed.io"
       }
+      env {
+        name  = "TEST_DESIGNER_LOGIN_EMAIL"
+        value = "e2e-designer@unifeed.io"
+      }
       dynamic "env" {
         for_each = var.unifeed_zitadel_manage_config ? [1] : []
         content {
