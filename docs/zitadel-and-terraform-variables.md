@@ -295,6 +295,46 @@ print('\n'.join(sorted(ids)))" > /tmp/tf.txt
 comm -23 /tmp/gcp.txt /tmp/tf.txt   # in GCP, unmanaged
 ```
 
+## 7a. Follow-up: retire the non-expiring PATs
+
+Done on 2026-08-12: the deploy path no longer uses a PAT. Cloud Build mints a
+Google-signed ID token (IAM Credentials `generateIdToken`, self-impersonation —
+`sa-cloudbuild` holds `roles/iam.serviceAccountTokenCreator` on itself) and the
+hub verifies email, allow-listed service account and audience. Neither
+`gcloud auth print-identity-token` nor the worker metadata server can mint an
+ID token on Cloud Build; both fail quietly, so don't reach for them.
+
+Still outstanding — the test PATs themselves:
+
+`unifeed-test-{admin,csr,customer,norole}-pat` are **opaque, non-expiring**
+bearer tokens with project roles on `unifeed-dev`. Being opaque they cannot
+self-expire; revoking means deleting them in Zitadel and rotating the secret.
+They are handed to test runs, which produce traces, HAR files and screenshots —
+exactly where bearer tokens escape, and a leak of these never ages out.
+
+The replacement is the mechanism the Terraform provider itself already uses:
+
+1. Add a `zitadel_machine_key` per test machine user and store the JSON key in
+   Secret Manager, replacing the PAT secrets.
+2. Have the runner exchange the key for an access token at run start via the
+   JWT-profile grant (`POST /oauth/v2/token`,
+   `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`) — see §3 for a
+   worked example.
+3. Drop `zitadel_personal_access_token` and its `expiration_date` workaround
+   (§1), which only exists to stop applies rotating these tokens.
+
+This does not remove a long-lived secret so much as change its shape: the key
+becomes the durable thing. The gain is that minted tokens die within the hour,
+so a token captured in a test artefact is worthless by the time anyone reads
+it, and keys carry a real expiry that forces rotation. A side benefit: a
+JWT-profile token carries project roles in its claims, so the backend's primary
+role path is exercised rather than the PAT-specific database fallback in
+`JwtAuthFilter`.
+
+Also still open: the hub accepts the admin PAT for callers other than the
+build — demo recordings take the lock with it. Migrating that caller would let
+the PAT branch in `requireBearer` be deleted.
+
 ## 8. Running a plan without terraform.tfvars
 
 Every other variable has a usable default, so a plan needs only the required
