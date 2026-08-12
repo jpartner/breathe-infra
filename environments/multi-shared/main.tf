@@ -973,9 +973,7 @@ module "platform_lb" {
       backend = "unifeed-zitadel"
     }
     unifeed-test = {
-      # hub.dev is the canonical host; test.dev is a transition alias until
-      # all callers (cloudbuild audiences, bookmarks) are confirmed moved.
-      hosts   = ["hub.dev.unifeed.io", "test.dev.unifeed.io"]
+      hosts   = ["hub.dev.unifeed.io"]
       backend = "unifeed-test"
     }
     unifeed-ingest = {
@@ -986,7 +984,7 @@ module "platform_lb" {
 
   default_backend = "unifeed-zitadel"
 
-  domains = [var.unifeed_zitadel_domain, "hub.dev.unifeed.io", "test.dev.unifeed.io", "ingest.unifeed.io"]
+  domains = [var.unifeed_zitadel_domain, "hub.dev.unifeed.io", "ingest.unifeed.io"]
 
   depends_on = [module.unifeed_zitadel]
 }
@@ -1000,18 +998,6 @@ resource "cloudflare_record" "unifeed_hub" {
 
   zone_id = var.unifeed_cloudflare_zone_id
   name    = "hub.dev"
-  content = module.platform_lb.ip_address
-  type    = "A"
-  proxied = false
-  ttl     = 300
-}
-
-# Transition alias for hub.dev — remove once all callers use hub.dev.unifeed.io
-resource "cloudflare_record" "unifeed_test" {
-  provider = cloudflare.unifeed
-
-  zone_id = var.unifeed_cloudflare_zone_id
-  name    = "test.dev"
   content = module.platform_lb.ip_address
   type    = "A"
   proxied = false

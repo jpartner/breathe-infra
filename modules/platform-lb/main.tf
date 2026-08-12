@@ -80,6 +80,15 @@ resource "google_compute_managed_ssl_certificate" "certs" {
   managed {
     domains = [each.value]
   }
+
+  # Removing a domain otherwise destroys its cert before the HTTPS proxy
+  # update that unreferences it, and GCP rejects deleting an in-use cert
+  # (resourceInUseByAnotherResource). CBD defers the destroy until after
+  # the proxy update. Only takes effect for instances applied with this
+  # flag already recorded in state.
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # HTTPS proxy
