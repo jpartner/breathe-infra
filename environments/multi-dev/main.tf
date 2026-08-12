@@ -276,13 +276,12 @@ resource "google_storage_bucket_iam_member" "backend_cost_pricing" {
 # Secrets — grant backend SA access to shared secrets
 # =============================================================================
 
-# Grant backend access to Zitadel service account key (for role lookups)
-resource "google_secret_manager_secret_iam_member" "backend_zitadel_sa" {
-  project   = var.shared_project_id
-  secret_id = "zitadel-service-account-key"
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.backend.email}"
-}
+# The backend once had a grant on `zitadel-service-account-key` "for role
+# lookups", but never mounted it, named it in an env var or read it in code.
+# The secret holds the legacy Breathe-era machine key, which no longer
+# authenticates against auth.unifeed.io (generic HTTP 500 Errors.Internal) —
+# so the grant was both unused and a signpost to the wrong credential. Removed
+# 2026-08-12; the secret itself is labelled status=superseded and is next.
 
 # Grant backend access to Typesense API key (catalogue search proxy)
 resource "google_secret_manager_secret_iam_member" "backend_typesense" {
@@ -410,7 +409,7 @@ resource "google_cloud_run_v2_service" "pa_migration" {
       }
       env {
         name  = "BREATHE_DB_USER"
-        value = "legacy_lookup"   # read-only role: SELECT only, created 2026-08-11
+        value = "legacy_lookup" # read-only role: SELECT only, created 2026-08-11
       }
       env {
         name = "BREATHE_DB_PASSWORD"
@@ -615,6 +614,17 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
       env {
         name  = "UNIFEED_NOTIFICATIONS_POSTMARK_DEFAULT_ADMIN_EMAIL"
         value = "dev@breathebranding.co.uk"
+      }
+      # Dev renders, attaches and audits email but does not hand it to
+      # Postmark: purchase orders would otherwise reach real suppliers every
+      # time the e2e suite runs. Suppressed messages are written to
+      # email_audit_log with status SUPPRESSED and their full body and
+      # attachment list, which is how the tests assert what would have gone.
+      # Staging and production deliberately leave this unset — the backend
+      # defaults to SEND, so an environment only goes quiet by saying so.
+      env {
+        name  = "UNIFEED_NOTIFICATIONS_DELIVERY"
+        value = "SUPPRESS"
       }
 
       # Tenant secret encryption (Cloud KMS)
