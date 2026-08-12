@@ -312,6 +312,39 @@ self-expire; revoking means deleting them in Zitadel and rotating the secret.
 They are handed to test runs, which produce traces, HAR files and screenshots —
 exactly where bearer tokens escape, and a leak of these never ages out.
 
+**The blocker is solved** (2026-08-12). A straight swap did not work, for a
+reason worth knowing before attempting it again: Zitadel asserts project roles
+under *two* different claim names. Tokens issued to an OIDC application use
+`urn:zitadel:iam:org:project:roles`; a token obtained with the
+`urn:zitadel:iam:org:projects:roles` scope — which is how a machine user
+exchanges a key via the JWT-profile grant — gets a **project-scoped** key
+instead, `urn:zitadel:iam:org:project:<projectId>:roles`. The backend read only
+the generic name, so machine-key tokens authenticated and then carried no roles
+at all: `/api/account/me` returned the right user with `roles: []`, and every
+admin and ingest call 403'd, which reads like a broken grant rather than a
+claim-name mismatch.
+
+`JwtAuthFilter` and `JwtValidator` now accept either shape (backend 7b4ec72,
+with a test). Verified against dev: the same token that returned `roles: []`
+and 403 now returns `roles: ['admin']` and 200 on admin, ingest and catalogue.
+
+A prototype key exists — `zitadel_machine_key.test_admin`, stored as
+`unifeed-test-admin-key` — and the exchange looks like this (note the scope;
+without it there are no roles):
+
+```
+scope = "openid profile urn:zitadel:iam:org:project:id:<projectId>:aud
+         urn:zitadel:iam:org:projects:roles"
+POST https://auth.unifeed.io/oauth/v2/token
+  grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=<signed JWT>
+```
+
+Tokens come back with a ~12 hour lifetime (Zitadel's default), not one hour —
+better than never expiring, but worth shortening in project settings if the
+window matters.
+
+Remaining work is now mechanical:
+
 The replacement is the mechanism the Terraform provider itself already uses:
 
 1. Add a `zitadel_machine_key` per test machine user and store the JSON key in

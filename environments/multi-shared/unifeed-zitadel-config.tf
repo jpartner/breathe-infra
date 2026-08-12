@@ -146,6 +146,35 @@ resource "zitadel_machine_user" "test_admin" {
   access_token_type = "ACCESS_TOKEN_TYPE_JWT"
 }
 
+# Machine key for the admin test identity, to be exchanged for a short-lived
+# token via the JWT-profile grant instead of holding a non-expiring PAT.
+# Proving ground for retiring the PATs entirely (see docs §7a).
+resource "zitadel_machine_key" "test_admin" {
+  count    = var.unifeed_zitadel_manage_config ? 1 : 0
+  provider = zitadel.unifeed
+
+  org_id          = module.unifeed_zitadel_config[0].org_ids["unifeed"]
+  user_id         = zitadel_machine_user.test_admin[0].id
+  key_type        = "KEY_TYPE_JSON"
+  expiration_date = "2027-01-31T00:00:00Z"
+}
+
+resource "google_secret_manager_secret" "test_admin_key" {
+  count = var.unifeed_zitadel_manage_config ? 1 : 0
+
+  project   = var.project_id
+  secret_id = "unifeed-test-admin-key"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "test_admin_key" {
+  count       = var.unifeed_zitadel_manage_config ? 1 : 0
+  secret      = google_secret_manager_secret.test_admin_key[0].id
+  secret_data = zitadel_machine_key.test_admin[0].key_details
+}
+
 resource "zitadel_personal_access_token" "test_admin" {
   count    = var.unifeed_zitadel_manage_config ? 1 : 0
   provider = zitadel.unifeed
@@ -361,7 +390,7 @@ resource "zitadel_user_grant" "test_login" {
 # gating is testable. Same password as the customer login user.
 locals {
   test_staff_logins = {
-    admin = { email = "e2e-admin@unifeed.io", role = "admin" }
+    admin    = { email = "e2e-admin@unifeed.io", role = "admin" }
     csr      = { email = "e2e-csr@unifeed.io", role = "csr" }
     designer = { email = "e2e-designer@unifeed.io", role = "designer" }
   }
