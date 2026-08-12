@@ -64,19 +64,44 @@ resource "google_secret_manager_secret_version" "hub_auth_secret" {
 
 # =============================================================================
 # Platform admins
-# Human users granted the platform-tools admin role. Email starts unverified
-# so Zitadel sends an initialization mail (SMTP via Postmark) for the user to
-# set their own password.
+# Human users granted the platform-tools admin role. The instance cannot send
+# initialization mail (no SMTP config, and postmark-api-key holds a
+# placeholder), so users get a temporary initial password — read it from the
+# Secret Manager secret below, hand it over out-of-band, and Zitadel forces a
+# change at first login. Email is marked verified for the same reason: the
+# verification mail could never arrive.
 # =============================================================================
+
+resource "random_password" "tom_initial" {
+  length           = 20
+  special          = true # org password policy requires a symbol
+  override_special = "!@#%*-_"
+}
+
+resource "google_secret_manager_secret" "tom_initial_password" {
+  project   = var.project_id
+  secret_id = "platform-admin-tom-initial-password"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "tom_initial_password" {
+  secret      = google_secret_manager_secret.tom_initial_password.id
+  secret_data = random_password.tom_initial.result
+}
 
 resource "zitadel_human_user" "tom" {
   provider = zitadel.unifeed
 
-  org_id     = local.unifeed_org_id
-  user_name  = "tom@breathebranding.co.uk"
-  first_name = "Tom"
-  last_name  = "Breathe"
-  email      = "tom@breathebranding.co.uk"
+  org_id            = local.unifeed_org_id
+  user_name         = "tom@breathebranding.co.uk"
+  first_name        = "Tom"
+  last_name         = "Breathe"
+  email             = "tom@breathebranding.co.uk"
+  is_email_verified = true
+
+  initial_password = random_password.tom_initial.result
 }
 
 resource "zitadel_user_grant" "tom_platform_admin" {
