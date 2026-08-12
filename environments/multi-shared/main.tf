@@ -106,7 +106,7 @@ resource "google_sql_database_instance" "main" {
     ip_configuration {
       ipv4_enabled                                  = false
       private_network                               = local.vpc_network_id
-      enable_private_path_for_google_cloud_services  = true
+      enable_private_path_for_google_cloud_services = true
     }
 
     backup_configuration {
@@ -225,6 +225,16 @@ resource "google_service_account" "cloudbuild" {
   account_id   = "sa-cloudbuild"
   display_name = "Cloud Build Service Account"
 
+}
+
+# Lets the build mint a Google ID token for itself (IAM Credentials
+# generateIdToken), so it can authenticate to the deploy hub without carrying
+# the non-expiring platform-admin PAT into every build step. Cloud Build's
+# metadata server does not serve ID tokens, so self-impersonation is the route.
+resource "google_service_account_iam_member" "cloudbuild_self_token_creator" {
+  service_account_id = google_service_account.cloudbuild.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.cloudbuild.email}"
 }
 
 resource "google_artifact_registry_repository_iam_member" "cloudbuild_writer" {
@@ -441,7 +451,7 @@ resource "google_project_iam_member" "test_runner_sql" {
 
 # Test runner needs to read test user PATs and login password
 resource "google_secret_manager_secret_iam_member" "test_runner_pats" {
-  for_each  = var.unifeed_zitadel_manage_config ? toset(["admin", "customer", "norole", "csr"]) : toset([])
+  for_each = var.unifeed_zitadel_manage_config ? toset(["admin", "customer", "norole", "csr"]) : toset([])
 
   project   = var.project_id
   secret_id = google_secret_manager_secret.test_pats[each.key].secret_id
@@ -450,7 +460,7 @@ resource "google_secret_manager_secret_iam_member" "test_runner_pats" {
 }
 
 resource "google_secret_manager_secret_iam_member" "test_runner_login_password" {
-  count     = var.unifeed_zitadel_manage_config ? 1 : 0
+  count = var.unifeed_zitadel_manage_config ? 1 : 0
 
   project   = var.project_id
   secret_id = google_secret_manager_secret.test_login_password[0].secret_id
@@ -649,6 +659,12 @@ resource "google_cloud_run_v2_service" "unifeed_test_runner" {
       env {
         name  = "ADMIN_URL"
         value = "https://admin-uniten.dev.unifeed.io"
+      }
+      # Codifies a flag first set imperatively on the live service (2026-08)
+      # so an apply does not strip it.
+      env {
+        name  = "SMOKE_PHASE_ENABLED"
+        value = "1"
       }
       env {
         name  = "TEST_ADMIN_LOGIN_EMAIL"
@@ -913,7 +929,9 @@ module "platform_lb" {
       backend = "unifeed-zitadel"
     }
     unifeed-test = {
-      hosts   = ["test.dev.unifeed.io"]
+      # hub.dev is the canonical host; test.dev is a transition alias until
+      # all callers (cloudbuild audiences, bookmarks) are confirmed moved.
+      hosts   = ["hub.dev.unifeed.io", "test.dev.unifeed.io"]
       backend = "unifeed-test"
     }
     unifeed-ingest = {
@@ -924,7 +942,7 @@ module "platform_lb" {
 
   default_backend = "unifeed-zitadel"
 
-  domains = [var.unifeed_zitadel_domain, "test.dev.unifeed.io", "ingest.unifeed.io"]
+  domains = [var.unifeed_zitadel_domain, "hub.dev.unifeed.io", "test.dev.unifeed.io", "ingest.unifeed.io"]
 
   depends_on = [module.unifeed_zitadel]
 }
@@ -933,6 +951,18 @@ module "platform_lb" {
 # Cloudflare DNS — unifeed.io
 # =============================================================================
 
+resource "cloudflare_record" "unifeed_hub" {
+  provider = cloudflare.unifeed
+
+  zone_id = var.unifeed_cloudflare_zone_id
+  name    = "hub.dev"
+  content = module.platform_lb.ip_address
+  type    = "A"
+  proxied = false
+  ttl     = 300
+}
+
+# Transition alias for hub.dev — remove once all callers use hub.dev.unifeed.io
 resource "cloudflare_record" "unifeed_test" {
   provider = cloudflare.unifeed
 
