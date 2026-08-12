@@ -152,6 +152,14 @@ resource "zitadel_personal_access_token" "test_admin" {
 
   org_id  = module.unifeed_zitadel_config[0].org_ids["unifeed"]
   user_id = zitadel_machine_user.test_admin[0].id
+  # Declared to match what Zitadel actually issued. Left undeclared, Terraform
+  # sees expiration_date drift to null and force-replaces the token on EVERY
+  # apply — silently rotating the credentials the e2e suite and the deploy
+  # pipeline authenticate with. Non-expiring is not the end state: the
+  # improvement is short-lived tokens minted from a machine-user key via the
+  # JWT-profile grant (as the Terraform provider itself does), which would
+  # retire these PATs entirely.
+  expiration_date = "9999-12-31T23:59:59Z"
 }
 
 resource "zitadel_user_grant" "test_admin" {
@@ -181,6 +189,14 @@ resource "zitadel_personal_access_token" "test_customer" {
 
   org_id  = module.unifeed_zitadel_config[0].org_ids["unifeed"]
   user_id = zitadel_machine_user.test_customer[0].id
+  # Declared to match what Zitadel actually issued. Left undeclared, Terraform
+  # sees expiration_date drift to null and force-replaces the token on EVERY
+  # apply — silently rotating the credentials the e2e suite and the deploy
+  # pipeline authenticate with. Non-expiring is not the end state: the
+  # improvement is short-lived tokens minted from a machine-user key via the
+  # JWT-profile grant (as the Terraform provider itself does), which would
+  # retire these PATs entirely.
+  expiration_date = "9999-12-31T23:59:59Z"
 }
 
 resource "zitadel_user_grant" "test_customer" {
@@ -210,6 +226,14 @@ resource "zitadel_personal_access_token" "test_norole" {
 
   org_id  = module.unifeed_zitadel_config[0].org_ids["unifeed"]
   user_id = zitadel_machine_user.test_norole[0].id
+  # Declared to match what Zitadel actually issued. Left undeclared, Terraform
+  # sees expiration_date drift to null and force-replaces the token on EVERY
+  # apply — silently rotating the credentials the e2e suite and the deploy
+  # pipeline authenticate with. Non-expiring is not the end state: the
+  # improvement is short-lived tokens minted from a machine-user key via the
+  # JWT-profile grant (as the Terraform provider itself does), which would
+  # retire these PATs entirely.
+  expiration_date = "9999-12-31T23:59:59Z"
 }
 
 resource "zitadel_machine_user" "test_csr" {
@@ -229,6 +253,14 @@ resource "zitadel_personal_access_token" "test_csr" {
 
   org_id  = module.unifeed_zitadel_config[0].org_ids["unifeed"]
   user_id = zitadel_machine_user.test_csr[0].id
+  # Declared to match what Zitadel actually issued. Left undeclared, Terraform
+  # sees expiration_date drift to null and force-replaces the token on EVERY
+  # apply — silently rotating the credentials the e2e suite and the deploy
+  # pipeline authenticate with. Non-expiring is not the end state: the
+  # improvement is short-lived tokens minted from a machine-user key via the
+  # JWT-profile grant (as the Terraform provider itself does), which would
+  # retire these PATs entirely.
+  expiration_date = "9999-12-31T23:59:59Z"
 }
 
 resource "zitadel_user_grant" "test_csr" {
@@ -263,6 +295,14 @@ resource "zitadel_personal_access_token" "staff_manager" {
 
   org_id  = module.unifeed_zitadel_config[0].org_ids["unifeed"]
   user_id = zitadel_machine_user.staff_manager[0].id
+  # Declared to match what Zitadel actually issued. Left undeclared, Terraform
+  # sees expiration_date drift to null and force-replaces the token on EVERY
+  # apply — silently rotating the credentials the e2e suite and the deploy
+  # pipeline authenticate with. Non-expiring is not the end state: the
+  # improvement is short-lived tokens minted from a machine-user key via the
+  # JWT-profile grant (as the Terraform provider itself does), which would
+  # retire these PATs entirely.
+  expiration_date = "9999-12-31T23:59:59Z"
 }
 
 resource "zitadel_org_member" "staff_manager" {
