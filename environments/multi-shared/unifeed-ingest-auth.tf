@@ -8,8 +8,10 @@ locals {
 resource "zitadel_project" "ingest" {
   provider = zitadel.unifeed
 
-  org_id                 = local.unifeed_org_id
-  name                   = "Ingest Tools"
+  org_id = local.unifeed_org_id
+  # Renamed from "Ingest Tools": the deploy hub's OIDC app (unifeed-hub-auth.tf)
+  # lives here too, so the project's admin role is the platform-admins group.
+  name                   = "Platform Tools"
   project_role_assertion = true
 }
 

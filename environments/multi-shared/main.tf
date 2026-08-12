@@ -468,6 +468,19 @@ resource "google_secret_manager_secret_iam_member" "test_runner_login_password" 
   member    = "serviceAccount:${google_service_account.test_runner.email}"
 }
 
+# Hub OIDC login secrets (see unifeed-hub-auth.tf)
+resource "google_secret_manager_secret_iam_member" "test_runner_hub_auth" {
+  for_each = {
+    zitadel_client = google_secret_manager_secret.hub_zitadel_secret.secret_id
+    nextauth       = google_secret_manager_secret.hub_auth_secret.secret_id
+  }
+
+  project   = var.project_id
+  secret_id = each.value
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.test_runner.email}"
+}
+
 # Test runner needs to read the DB password
 resource "google_secret_manager_secret_iam_member" "test_runner_db" {
   project   = var.project_id
@@ -665,6 +678,37 @@ resource "google_cloud_run_v2_service" "unifeed_test_runner" {
       env {
         name  = "SMOKE_PHASE_ENABLED"
         value = "1"
+      }
+      # Zitadel OIDC login for the hub UI (see unifeed-hub-auth.tf)
+      env {
+        name  = "NEXTAUTH_URL"
+        value = "https://hub.dev.unifeed.io"
+      }
+      env {
+        name  = "ZITADEL_ISSUER"
+        value = "https://${var.unifeed_zitadel_domain}"
+      }
+      env {
+        name  = "ZITADEL_CLIENT_ID"
+        value = zitadel_application_oidc.hub.client_id
+      }
+      env {
+        name = "ZITADEL_CLIENT_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.hub_zitadel_secret.id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "NEXTAUTH_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.hub_auth_secret.id
+            version = "latest"
+          }
+        }
       }
       env {
         name  = "TEST_ADMIN_LOGIN_EMAIL"
