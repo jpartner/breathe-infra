@@ -1,17 +1,42 @@
 # Copy to terraform.tfvars and fill in values
 # NEVER commit terraform.tfvars — it's in .gitignore
+#
+# Most variables already have working defaults in variables.tf (project ids,
+# region, Zitadel domains, OIDC client ids). Only the three marked REQUIRED
+# below have to be supplied — either here or with -var on the command line.
 
-project_id = "breathe-shared"
-region     = "europe-west2"
-
+# REQUIRED — no default. Without it, plan/apply refuses to run at all.
 environment_project_numbers = [
-  # "123456789012",  # breathe-dev-env
-  # "234567890123",  # breathe-staging-env
-  # "345678901234",  # breathe-production-env
+  "815682864674", # breathe-dev-env
+  "400245265670", # breathe-staging-env
+  "375280996820", # breathe-production-env
 ]
 
-github_owner = "jpartner"
+# REQUIRED — the Zitadel provider authenticates with a machine-user JSON key.
+# Two keys exist and only one works: use the *unifeed* key (machine user
+# 384306430871645708), stored as Secret Manager `unifeed-zitadel-terraform-key`.
+# The similarly-named `zitadel-service-account-key` is the legacy Breathe-era
+# key and fails with a generic HTTP 500 that looks like a broken server.
+#   gcloud secrets versions access latest --secret=unifeed-zitadel-terraform-key \
+#     --project=breathe-shared > ~/.zitadel/unifeed-terraform-key.json
+unifeed_zitadel_key_path = "/home/you/.zitadel/unifeed-terraform-key.json"
 
-# Zitadel
-zitadel_domain        = "auth.breathebranding.co.uk"
-zitadel_db_connection = "breathe-shared:europe-west2:breathe-db"
+# REQUIRED — the Cloudflare provider rejects an empty token.
+#   gcloud secrets versions access latest --secret=unifeed-cloudflare-api-token \
+#     --project=breathe-shared
+unifeed_cloudflare_api_token = ""
+
+# --- Optional: these already default to the values below ---
+# project_id = "breathe-shared"
+# region     = "europe-west2"
+# github_owner = "jpartner"
+#
+# unifeed_zitadel_manage_config defaults to TRUE and should stay true.
+# It gates ~75 Zitadel resources — every org, project and OIDC app across dev,
+# staging and production, plus the e2e machine users and their PATs. Setting it
+# false (or, before the default was corrected, simply omitting it) makes a plan
+# propose destroying all of them. Set it false only when bootstrapping an
+# environment whose Zitadel does not exist yet.
+# unifeed_zitadel_manage_config = true
+#
+# See docs/zitadel-and-terraform-variables.md

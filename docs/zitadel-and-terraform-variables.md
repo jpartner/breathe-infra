@@ -8,20 +8,28 @@ on **2026-08-11**; re-check before trusting the specifics.
 
 ## 1. The dangerous default
 
-`terraform.tfvars` is gitignored and is **not** in this repo. That matters more
-than it looks, because two variables gate large blocks of resources with
-`count = var.<flag> ? 1 : 0`, and **both default to `false`**:
+`terraform.tfvars` is gitignored, and most variables already carry working
+defaults, so an apply only needs three values supplied (see §8). That is fine in
+itself — the hazard was narrower and sharper: two variables gate large blocks of
+resources with `count = var.<flag> ? 1 : 0`, and **both defaulted to `false`**:
 
 | Variable | Default | Resources in `multi-shared` state |
 |---|---|---|
 | `unifeed_zitadel_manage_config` | was `false` | **75** — every org, project, OIDC app (dev **and production**), plus the e2e machine users and their PATs |
 | `zitadel_manage_config` | `false` | 0 — legacy, see §2 |
 
-Running `terraform apply` in `multi-shared` without setting
-`unifeed_zitadel_manage_config = true` therefore plans to **destroy all 75
-Zitadel resources**, including production orgs and the PATs the e2e suite
-authenticates with. Nothing warns you; the flag simply evaluates to `false` and
-the resources fall out of the configuration.
+A completely bare `terraform apply` was never the danger — it fails immediately
+on the required `environment_project_numbers`. The reachable path was a
+*partial* invocation: supply the project numbers but not the gating flag, and
+the plan succeeds and proposes **destroying all 75 Zitadel resources**,
+including production orgs and the PATs the e2e suite authenticates with.
+Nothing warns you; the flag simply evaluates to `false` and the resources fall
+out of the configuration.
+
+That was easy to hit because `terraform.tfvars.example` — the file everyone
+copies — listed `environment_project_numbers` and never mentioned the gating
+flag. Copy the example, fill it in, apply. The example now documents all three
+required values and the flag.
 
 The default has since been flipped to `true` so that the common case matches
 reality: the resources exist and are managed. With no valid credentials an apply
