@@ -73,8 +73,30 @@ data "archive_file" "build_slack_notifier" {
 # The hash in the object name is what makes a code change redeploy the function.
 # With a static name, Terraform sees no diff and the function keeps running the
 # old source.
+#
+# The hash is computed from the source files' CONTENT, not from the zip.
+# archive_file's output_md5 covers the archive bytes, which include file
+# modification times — so a fresh git checkout produces a different hash from a
+# working tree with the same content, and CI and a laptop disagree forever. That
+# made the plan job propose replacing this object on every run, which the
+# destroy gate then failed on: a permanently red build caused entirely by the
+# tooling. Content hashing is stable wherever it runs.
+locals {
+  notifier_source_dir = "${path.module}/../../functions/cloud-build-slack"
+
+  notifier_source_files = sort([
+    for f in fileset(local.notifier_source_dir, "**") :
+    f if !startswith(f, "__pycache__") && !endswith(f, ".pyc")
+  ])
+
+  notifier_source_hash = substr(sha256(join("", [
+    for f in local.notifier_source_files :
+    "${f}:${filesha256("${local.notifier_source_dir}/${f}")}"
+  ])), 0, 32)
+}
+
 resource "google_storage_bucket_object" "build_slack_notifier" {
-  name   = "cloud-build-slack-${data.archive_file.build_slack_notifier.output_md5}.zip"
+  name   = "cloud-build-slack-${local.notifier_source_hash}.zip"
   bucket = google_storage_bucket.function_source.name
   source = data.archive_file.build_slack_notifier.output_path
 }
