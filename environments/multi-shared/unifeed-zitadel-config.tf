@@ -357,6 +357,40 @@ resource "zitadel_user_grant" "test_login" {
   role_keys  = ["customer"]
 }
 
+# Staff-role login users for admin-ui browser tests — one per grant so role
+# gating is testable. Same password as the customer login user.
+locals {
+  test_staff_logins = {
+    admin = { email = "e2e-admin@unifeed.io", role = "admin" }
+    csr   = { email = "e2e-csr@unifeed.io", role = "csr" }
+  }
+}
+
+resource "zitadel_human_user" "test_staff_login" {
+  for_each = var.unifeed_zitadel_manage_config ? local.test_staff_logins : {}
+  provider = zitadel.unifeed
+
+  org_id            = module.unifeed_zitadel_config[0].org_ids["unifeed"]
+  user_name         = "e2e-${each.key}-login"
+  first_name        = "Test"
+  last_name         = upper(each.key)
+  email             = each.value.email
+  is_email_verified = true
+
+  initial_password             = var.unifeed_test_user_password
+  initial_skip_password_change = true
+}
+
+resource "zitadel_user_grant" "test_staff_login" {
+  for_each = var.unifeed_zitadel_manage_config ? local.test_staff_logins : {}
+  provider = zitadel.unifeed
+
+  org_id     = module.unifeed_zitadel_config[0].org_ids["unifeed"]
+  project_id = module.unifeed_zitadel_config[0].project_ids["unifeed-dev"]
+  user_id    = zitadel_human_user.test_staff_login[each.key].id
+  role_keys  = [each.value.role]
+}
+
 # -- Store PATs and test credentials in Secret Manager --
 
 resource "google_secret_manager_secret" "test_pats" {

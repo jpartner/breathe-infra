@@ -650,6 +650,14 @@ resource "google_cloud_run_v2_service" "unifeed_test_runner" {
         name  = "ADMIN_URL"
         value = "https://admin-uniten.dev.unifeed.io"
       }
+      env {
+        name  = "TEST_ADMIN_LOGIN_EMAIL"
+        value = "e2e-admin@unifeed.io"
+      }
+      env {
+        name  = "TEST_CSR_LOGIN_EMAIL"
+        value = "e2e-csr@unifeed.io"
+      }
       dynamic "env" {
         for_each = var.unifeed_zitadel_manage_config ? [1] : []
         content {
