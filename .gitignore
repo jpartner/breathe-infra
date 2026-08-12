@@ -31,3 +31,7 @@ Thumbs.db
 *.key
 credentials.json
 service-account.json
+
+# Python bytecode from local syntax checks
+__pycache__/
+*.pyc

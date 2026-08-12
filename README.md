@@ -63,6 +63,33 @@ terraform apply
 > `unifeed_zitadel_*` variable sets is live, and the two-phase client-ID dance
 > between `multi-shared` and `multi-dev`.
 
+### Continuous plan
+
+Every push to `main` runs [`cloudbuild/terraform-plan.yaml`](cloudbuild/terraform-plan.yaml)
+in Cloud Build (trigger `breathe-infra-plan`, `breathe-shared`/`europe-west2`).
+It plans both live environments and **never applies** — it runs as
+`sa-terraform-plan`, which holds `roles/viewer` and nothing that can mutate GCP.
+
+The build is red only when the plan errors, or when it proposes **destroying**
+anything. Adds and updates pass: this repo carries standing drift by design, so
+failing on a non-empty plan would leave the build permanently red. Applying is
+still a deliberate local `terraform apply` — see the destroy-trap warning above,
+which is exactly what the gate watches for.
+
+### Build notifications
+
+Every Cloud Build in `breathe-shared` — app deploys as well as the plan job —
+is posted to Slack by the `cloud-build-slack-notifier` function
+([`functions/cloud-build-slack/`](functions/cloud-build-slack/)), which
+subscribes to the `cloud-builds` Pub/Sub topic. Only terminal statuses are
+posted: Cloud Build emits `QUEUED` and `WORKING` for the same build, and
+relaying those would mean three messages each.
+
+The channel is the `slack_build_channel` variable; credentials come from the
+`slack-bot-token` secret. Changing the function's code redeploys it because the
+source object name carries the archive hash — a static name looks like no diff
+and silently keeps the old code running.
+
 ## Multi-Tenancy
 
 Tenancy is managed at the application layer, not infrastructure. All tenants share:

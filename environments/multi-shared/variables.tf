@@ -167,3 +167,9 @@ variable "db_tier" {
   type        = string
   default     = "db-custom-2-8192"
 }
+
+variable "slack_build_channel" {
+  description = "Slack channel ID for Cloud Build notifications"
+  type        = string
+  default     = "C0BPQ4R7HC6"
+}

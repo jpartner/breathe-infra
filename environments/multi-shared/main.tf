@@ -26,6 +26,10 @@ terraform {
       source  = "cloudflare/cloudflare"
       version = "~> 4.0"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+    }
   }
 
   backend "gcs" {
@@ -430,6 +434,137 @@ resource "google_cloudbuild_trigger" "unifeed_pdf_dev" {
   }
 
   service_account = google_service_account.cloudbuild.id
+}
+
+# =============================================================================
+# Terraform plan CI — plan-only, never applies
+# =============================================================================
+#
+# Runs cloudbuild/terraform-plan.yaml on every push to this repo's main branch.
+# It reads state and reports; the gate fails the build only on proposed
+# destroys (see the header of that file for the full policy).
+#
+# This runs as its own service account rather than sa-cloudbuild. The deploy SA
+# has no business reading Terraform state or every secret in the project, and
+# this SA has no business deploying — keeping them apart means neither grows the
+# other's privileges by accident.
+
+resource "google_service_account" "terraform_plan" {
+  project      = var.project_id
+  account_id   = "sa-terraform-plan"
+  display_name = "Terraform plan CI (read-only)"
+  description  = "Runs terraform plan in Cloud Build. Never applies."
+}
+
+# Read the state bucket. Read-only is sufficient because the pipeline plans with
+# -lock=false, so it never writes a lock object. If a future change makes these
+# plans take the lock, this needs objectAdmin.
+resource "google_storage_bucket_iam_member" "terraform_plan_state" {
+  bucket = "breathe-terraform-state"
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.terraform_plan.email}"
+}
+
+# Refreshing the 15 managed google_secret_manager_secret_version resources means
+# reading their payloads, so this grant covers every secret in breathe-shared.
+# It is the widest privilege this SA holds and the main reason it is separate
+# from sa-cloudbuild.
+resource "google_project_iam_member" "terraform_plan_secrets" {
+  project = var.project_id
+  role    = "roles/secretmanager.secretAccessor"
+  member  = "serviceAccount:${google_service_account.terraform_plan.email}"
+}
+
+# Refresh reads every managed resource across the shared and environment
+# projects. roles/viewer is read-only by definition — this SA cannot mutate
+# anything in GCP, which is what makes a plan-only pipeline safe to run
+# unattended.
+resource "google_project_iam_member" "terraform_plan_viewer_shared" {
+  project = var.project_id
+  role    = "roles/viewer"
+  member  = "serviceAccount:${google_service_account.terraform_plan.email}"
+}
+
+resource "google_project_iam_member" "terraform_plan_viewer_envs" {
+  for_each = toset(var.environment_project_ids)
+
+  project = each.value
+  role    = "roles/viewer"
+  member  = "serviceAccount:${google_service_account.terraform_plan.email}"
+}
+
+# multi-dev still declares a cloudsql.client binding on the legacy `breathe-dev`
+# project (the one the README says never to touch), so a refresh has to read
+# that project's IAM policy. Read-only, and it does not make breathe-dev managed
+# — it only lets the plan see what is already declared about it.
+resource "google_project_iam_member" "terraform_plan_viewer_legacy" {
+  project = "breathe-dev"
+  role    = "roles/viewer"
+  member  = "serviceAccount:${google_service_account.terraform_plan.email}"
+}
+
+resource "google_project_iam_member" "terraform_plan_logs" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.terraform_plan.email}"
+}
+
+# roles/viewer covers storage.buckets.get and .list but NOT .getIamPolicy, so
+# refreshing the google_storage_bucket_iam_member resources 403s. The predefined
+# role that grants it — roles/storage.legacyBucketOwner — also grants
+# setIamPolicy, which would give this SA a write capability and cost us the
+# property that makes an unattended plan safe. Hence a custom role holding
+# exactly the one missing read permission.
+# Custom roles are per-project, and the managed buckets live in both the shared
+# project and the environment projects, so the role is defined in each.
+resource "google_project_iam_custom_role" "bucket_iam_reader" {
+  for_each = toset(concat([var.project_id], var.environment_project_ids))
+
+  project     = each.value
+  role_id     = "terraformPlanBucketIamReader"
+  title       = "Terraform Plan — Bucket IAM Reader"
+  description = "Reads bucket IAM policies so terraform plan can refresh bucket IAM bindings. Read-only."
+  permissions = ["storage.buckets.getIamPolicy"]
+}
+
+resource "google_project_iam_member" "terraform_plan_bucket_iam" {
+  for_each = google_project_iam_custom_role.bucket_iam_reader
+
+  project = each.value.project
+  role    = each.value.id
+  member  = "serviceAccount:${google_service_account.terraform_plan.email}"
+}
+
+# The single-project versions of the two resources above, applied earlier today.
+# Without these, expanding to for_each reads as destroy-then-create.
+moved {
+  from = google_project_iam_custom_role.bucket_iam_reader
+  to   = google_project_iam_custom_role.bucket_iam_reader["breathe-shared"]
+}
+
+moved {
+  from = google_project_iam_member.terraform_plan_bucket_iam
+  to   = google_project_iam_member.terraform_plan_bucket_iam["breathe-shared"]
+}
+
+resource "google_cloudbuild_trigger" "terraform_plan" {
+  project     = var.project_id
+  name        = "breathe-infra-plan"
+  description = "Plan-only Terraform run on push to main. Fails on proposed destroys."
+  location    = var.region
+
+  github {
+    owner = var.github_owner
+    name  = "breathe-infra"
+
+    push {
+      branch = "^main$"
+    }
+  }
+
+  filename = "cloudbuild/terraform-plan.yaml"
+
+  service_account = google_service_account.terraform_plan.id
 }
 
 # =============================================================================
