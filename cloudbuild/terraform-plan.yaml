@@ -24,6 +24,25 @@
 # -applied work — so failing on "plan is non-empty" would leave the build
 # permanently red, and a permanently red build is one nobody reads.
 #
+# WHAT GETS REPORTED TO SLACK
+#
+# Red/green alone does not surface drift: something changed by hand shows up as
+# an update, which is green, which means it sits in a log nobody opens. So the
+# gate posts to Slack whenever it finds proposed destroys OR drift — and stays
+# silent otherwise, because a message on every green run trains people to
+# ignore the channel.
+#
+# "Drift" here means Terraform's resource_drift (state vs reality: someone
+# changed something out of band), not resource_changes (config vs reality:
+# work you have not applied yet). The two are conflated in the human-readable
+# plan output and separate in the JSON.
+#
+# Drift is reported but does NOT fail the build. Knowing is the point; whether
+# to reconcile or re-codify is a judgement call, not something CI should force.
+# Raw drift is filtered hard — see the NOISE pattern in the gate step. On real
+# data every one of the 11 raw entries was server-assigned churn (etag,
+# generation, revision names); unfiltered, this would fire on every deploy.
+#
 # Plans run with -lock=false. A plan only reads state, and taking the lock would
 # mean a long human apply turns this build red for no reason. The cost is that a
 # plan captured mid-apply may be stale; the next push re-runs it.
@@ -41,6 +60,8 @@ substitutions:
   # time, which is the good outcome.
   _ENV_PROJECT_NUMBERS: '["815682864674","400245265670","375280996820"]'
   _TF_VERSION: '1.15.8'
+  # Same channel the build notifier posts to.
+  _SLACK_CHANNEL: 'C0BPQ4R7HC6'
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -57,6 +78,8 @@ availableSecrets:
       env: 'UNIFEED_CF_TOKEN'
     - versionName: projects/breathe-shared/secrets/cloudflare-api-token/versions/latest
       env: 'CF_TOKEN'
+    - versionName: projects/breathe-shared/secrets/slack-bot-token/versions/latest
+      env: 'SLACK_TOKEN'
 
 steps:
   # ---------------------------------------------------------------------------
@@ -126,48 +149,143 @@ steps:
   # The gate. Summarise both plans and fail only on proposed destroys.
   # ---------------------------------------------------------------------------
   - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'gate-on-destroys'
+    id: 'gate-and-report'
     entrypoint: 'python3'
+    secretEnv: ['SLACK_TOKEN']
+    env:
+      - 'SLACK_CHANNEL=${_SLACK_CHANNEL}'
     args:
       - '-c'
       - |
-        import json, sys
+        import json, os, re, sys, urllib.request
 
-        failed = False
+        # Attributes GCP assigns itself. They differ on every deploy and mean
+        # nothing about whether a human changed something out of band. Without
+        # this filter every deploy reports 7 "drifted" services and the report
+        # becomes noise nobody reads — which is the failure mode this is meant
+        # to fix, not reproduce.
+        #
+        # template.containers.image is in here deliberately: CI moves image tags
+        # on every deploy and the services carry lifecycle ignore_changes on it
+        # precisely so Terraform tolerates that. Reporting it would flag the
+        # intended design as drift.
+        NOISE = re.compile(r"""^(
+            etag | uid | generation | observed_generation
+          | create_time | update_time | delete_time | expire_time
+          | last_modifier | reconciling | launch_stage
+          | latest_created_revision | latest_ready_revision
+          | conditions\[\] .* | terminal_condition\[\] .*
+          | traffic\[\] .* | traffic_statuses\[\] .*
+          | effective_labels .* | terraform_labels .*
+          | template\[\]\.containers\[\]\.image
+        )$""", re.X)
+
+        def flatten(value, prefix=""):
+            out = {}
+            if isinstance(value, dict):
+                for k, v in value.items():
+                    out.update(flatten(v, prefix + "." + k if prefix else k))
+            elif isinstance(value, list):
+                for i, v in enumerate(value):
+                    out.update(flatten(v, "%s[%d]" % (prefix, i)))
+            else:
+                out[prefix] = value
+            return out
+
+        def meaningful_drift(entry):
+            """Attribute paths that changed and are not server-assigned."""
+            change = entry.get("change", {})
+            before = flatten(change.get("before") or {})
+            after = flatten(change.get("after") or {})
+            changed = set()
+            for key in set(before) | set(after):
+                if before.get(key) == after.get(key):
+                    continue
+                normalised = re.sub(r"\[\d+\]", "[]", key)
+                if not NOISE.match(normalised):
+                    changed.add(normalised)
+            return sorted(changed)
+
+        destroys, drifted, summary = [], [], []
+
         for env in ("multi-shared", "multi-dev"):
             with open("/workspace/%s.json" % env) as fh:
                 plan = json.load(fh)
 
-            create = update = delete = replace = 0
-            destroyed = []
+            counts = {"create": 0, "update": 0, "delete": 0, "replace": 0}
             for rc in plan.get("resource_changes", []):
                 actions = rc.get("change", {}).get("actions", [])
                 if actions == ["create"]:
-                    create += 1
+                    counts["create"] += 1
                 elif actions == ["update"]:
-                    update += 1
+                    counts["update"] += 1
                 elif actions == ["delete"]:
-                    delete += 1
-                    destroyed.append(rc["address"])
+                    counts["delete"] += 1
+                    destroys.append("%s: %s" % (env, rc["address"]))
                 elif "delete" in actions and "create" in actions:
-                    replace += 1
-                    destroyed.append(rc["address"] + " (replace)")
+                    counts["replace"] += 1
+                    destroys.append("%s: %s (replace)" % (env, rc["address"]))
 
-            print("%s: +%d ~%d -%d replace:%d"
-                  % (env, create, update, delete, replace))
+            env_drift = []
+            for entry in plan.get("resource_drift", []):
+                attrs = meaningful_drift(entry)
+                if attrs:
+                    env_drift.append((entry["address"], attrs))
+                    drifted.append("%s: %s — %s"
+                                   % (env, entry["address"], ", ".join(attrs[:4])))
 
-            if destroyed:
-                failed = True
-                print("  %d resource(s) would be destroyed:" % len(destroyed))
-                for addr in destroyed:
-                    print("    - " + addr)
-                if any(".unifeed_zitadel_config" in a for a in destroyed):
-                    print("  !! Destroys under module.unifeed_zitadel_config are")
-                    print("     the signature of a missing or mistyped gating")
-                    print("     variable, not a real change. See docs §1 before")
-                    print("     applying anything.")
+            raw = len(plan.get("resource_drift", []))
+            print("%s: +%d ~%d -%d replace:%d  |  drift %d of %d raw entries"
+                  % (env, counts["create"], counts["update"], counts["delete"],
+                     counts["replace"], len(env_drift), raw))
+            summary.append("*%s* +%d ~%d -%d  ·  drift %d"
+                           % (env, counts["create"], counts["update"],
+                              counts["delete"], len(env_drift)))
 
-        if failed:
+            for address, attrs in env_drift:
+                print("    DRIFT %s" % address)
+                for attr in attrs:
+                    print("            %s" % attr)
+
+        if destroys:
+            print("\n%d resource(s) would be destroyed:" % len(destroys))
+            for item in destroys:
+                print("    - " + item)
+            if any(".unifeed_zitadel_config" in d for d in destroys):
+                print("  !! Destroys under module.unifeed_zitadel_config are the")
+                print("     signature of a missing or mistyped gating variable,")
+                print("     not a real change. See docs §1 before applying.")
+
+        # Slack gets a message only when there is something to act on. A post on
+        # every green run trains people to ignore the channel.
+        if destroys or drifted:
+            lines = []
+            if destroys:
+                lines.append(":warning: *terraform plan proposes destroying %d resource(s)*"
+                             % len(destroys))
+                lines += ["    • " + d for d in destroys[:10]]
+            if drifted:
+                lines.append(":mag: *infrastructure changed outside Terraform* (%d)"
+                             % len(drifted))
+                lines += ["    • " + d for d in drifted[:10]]
+            lines.append("  ·  ".join(summary))
+
+            body = json.dumps({
+                "channel": os.environ["SLACK_CHANNEL"],
+                "text": "\n".join(lines),
+                "unfurl_links": False,
+                "unfurl_media": False,
+            }).encode("utf-8")
+            request = urllib.request.Request(
+                "https://slack.com/api/chat.postMessage", data=body,
+                headers={"Authorization": "Bearer " + os.environ["SLACK_TOKEN"],
+                         "Content-Type": "application/json; charset=utf-8"})
+            with urllib.request.urlopen(request, timeout=10) as response:
+                result = json.load(response)
+            if not result.get("ok"):
+                print("WARNING: Slack post failed: %s" % result.get("error"))
+
+        if destroys:
             print("\nFAILED: this plan proposes destroying resources.")
             sys.exit(1)
         print("\nOK: no destroys proposed.")

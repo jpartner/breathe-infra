@@ -76,6 +76,23 @@ failing on a non-empty plan would leave the build permanently red. Applying is
 still a deliberate local `terraform apply` — see the destroy-trap warning above,
 which is exactly what the gate watches for.
 
+**Drift is reported, not gated.** Anything changed outside Terraform — the
+classic `gcloud run services update` that the next apply silently reverts — is
+posted to Slack with the resource and the attributes that differ. It does not
+fail the build: knowing is the point, and whether to reconcile or re-codify is
+a judgement call rather than something CI should force.
+
+This uses Terraform's `resource_drift` (state vs reality) rather than
+`resource_changes` (config vs reality), which is the difference between "someone
+changed this by hand" and "you have not applied your own work yet".
+
+Raw drift is mostly noise and is filtered hard: on real data all 11 raw entries
+were server-assigned churn — `etag`, `generation`, revision names, and the image
+tags CI moves on every deploy and that `lifecycle ignore_changes` exists to
+tolerate. Unfiltered, this would fire on every deploy and be ignored within a
+week. If you add resources whose server-side fields churn, extend the `NOISE`
+pattern in the gate step rather than muting the report.
+
 ### Build notifications
 
 Every Cloud Build in `breathe-shared` — app deploys as well as the plan job —
