@@ -47,20 +47,24 @@ def _duration(build):
 def _describe(build):
     """Best-effort human name for what was built.
 
-    Trigger name is not present on every build — manual `gcloud builds submit`
-    runs have no trigger at all — so fall back through source info rather than
-    posting an opaque build id.
+    TRIGGER_NAME is absent more often than you would expect: manual
+    `gcloud builds submit` runs have no trigger, and a trigger whose config file
+    is missing fails *before* substitutions resolve. Falling through to the bare
+    word "build" made those indistinguishable in Slack, so the trigger id is
+    used as a last resort — ugly, but identifying.
     """
-    name = build.get("substitutions", {}).get("TRIGGER_NAME")
+    subs = build.get("substitutions", {})
+    name = subs.get("TRIGGER_NAME")
     if name:
         return name
     source = build.get("source", {})
     repo = source.get("repoSource", {}).get("repoName")
     if repo:
         return repo
-    if source.get("storageSource"):
-        return "manual submit"
-    return "build"
+    trigger_id = build.get("buildTriggerId")
+    if trigger_id:
+        return "trigger %s" % trigger_id[:8]
+    return "manual build"
 
 
 def _blocks(build):
@@ -86,32 +90,50 @@ def _blocks(build):
     blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": line}}]
 
     # A failure is only actionable with the log, and the failing step is the
-    # first thing anyone asks for.
+    # first thing anyone asks for. statusDetail carries the reason a build died
+    # before running anything (a missing config file, most usefully).
+    detail = []
     if status != "SUCCESS":
         failed = [
             s.get("id") or s.get("name", "?")
             for s in build.get("steps", [])
             if s.get("status") in ("FAILURE", "INTERNAL_ERROR", "TIMEOUT")
         ]
-        detail = []
         if failed:
-            detail.append("failed at: %s" % ", ".join(failed))
-        if build.get("logUrl"):
-            detail.append("<%s|open logs>" % build["logUrl"])
-        if detail:
-            blocks.append(
-                {
-                    "type": "context",
-                    "elements": [{"type": "mrkdwn", "text": "  ·  ".join(detail)}],
-                }
-            )
+            detail.append("failed at *%s*" % ", ".join(failed))
+        reason = build.get("statusDetail")
+        if reason:
+            detail.append(reason)
+
+    build_id = build.get("id", "")
+    if build_id:
+        detail.append("`%s`" % build_id[:8])
+    if build.get("logUrl"):
+        detail.append("<%s|logs>" % build["logUrl"])
+
+    if detail:
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": "  ·  ".join(detail)}],
+            }
+        )
 
     return line, blocks
 
 
 def _post(channel, token, text, blocks):
     payload = json.dumps(
-        {"channel": channel, "text": text, "blocks": blocks}
+        {
+            "channel": channel,
+            "text": text,
+            "blocks": blocks,
+            # Cloud Build log URLs sit behind a Google login, so Slack unfurls
+            # them into a large, useless "Google Cloud Platform" card that
+            # dwarfs the message itself.
+            "unfurl_links": False,
+            "unfurl_media": False,
+        }
     ).encode("utf-8")
     req = urllib.request.Request(
         SLACK_API,
