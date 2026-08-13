@@ -228,16 +228,24 @@ failure that looks like a misconfigured tenant.
 
 ## 7. Secret inventory — and what Terraform actually owns
 
-`breathe-shared` holds 50 secrets. **Terraform manages 47 of them.** Until
-2026-08-12 it managed 22, and the other 28 were invisible to `plan` and would
-have survived a destroy — nothing in this repo recreated them, and nothing said
-so. 25 were adopted in `environments/multi-shared/adopted-secrets.tf`; the
-remaining three are listed below and are deliberate.
+`breathe-shared` holds 50 secrets and **Terraform manages all 50.** There are no
+unmanaged secrets and no secrets in state that do not exist — verified
+2026-08-13 with the command at the end of this section.
 
-Counts verified 2026-08-12 against `multi-shared` state. Adopted secrets are
-managed as **containers only** — Terraform does not own their versions, so the
-values stay out of the state file and rotation remains a
-`gcloud secrets versions add`.
+It was not always so. On 2026-08-12 Terraform owned 22 of 50; the other 28 had
+been created with `gcloud` rather than declared, so they were invisible to
+`plan` and would have survived a destroy. 25 were adopted into
+`environments/multi-shared/adopted-secrets.tf` and 3 were deleted as dead.
+
+**Keeping it at 50/50 is the point.** Creating a secret with `gcloud secrets
+create` reopens the gap silently — nothing warns you, and the secret simply
+never appears in a plan again. Declare new secrets in Terraform, or adopt them
+in the same change.
+
+Adopted secrets are managed as **containers only** — Terraform does not own
+their versions, so the values stay out of the state file and rotation remains a
+`gcloud secrets versions add`. A rebuild therefore recreates the containers
+empty; that is a deliberate trade against putting supplier credentials in state.
 
 **Terraform-managed and value-owning (22)** — an apply can create, rotate or
 destroy these, and the values live in state:
@@ -288,16 +296,45 @@ Two are worth attention:
   backend now refuses worker requests outright when it is unset rather than
   falling back to a default key.
 
-**Deliberately not managed (3)** — all three are removal candidates, not gaps:
+**Deleted 2026-08-13 (3)** — never adopted, because adopting a secret you intend
+to delete just adds a step:
 
-| Secret | Why |
+| Secret | Why it went |
 |---|---|
 | `test-user-credentials` | No reference in any repo — code, config or cloudbuild |
-| `goldstar-api-password` | Goldstar is supplier `SP016`, but unlike every other supplier it has no `secret_key_ref` in `multi-dev/main.tf` |
-| `zitadel-service-account-key` | The legacy Breathe-era key (§3), labelled `status=superseded`. It no longer authenticates, and its only consumer — a backend IAM grant that was never mounted or read — was removed 2026-08-12 |
+| `goldstar-api-password` | Goldstar is supplier `SP016`, but unlike every other supplier it had no `secret_key_ref` in `multi-dev/main.tf` |
+| `zitadel-service-account-key` | The legacy Breathe-era key (§3), labelled `status=superseded`. It no longer authenticated, and its only consumer — a backend IAM grant that was never mounted or read — was removed in `def3558` and applied 2026-08-13 |
 
-Adopting a secret you intend to delete just adds a step, so these were left out.
-Deleting them is the follow-up.
+Deleting `zitadel-service-account-key` removes the trap described in §3: it was
+the only obviously-named Zitadel secret, so reaching for it was the natural
+mistake, and it failed with a generic `HTTP 500 Errors.Internal` that reads like
+a broken server rather than a wrong credential.
+
+Note on the evidence: **data-access audit logging is not enabled on this
+project**, so there are no `AccessSecretVersion` records and the absence of read
+logs proved nothing. The case for these being dead rested on a code search
+across all repos and on their having no IAM bindings at all. If you want
+deletion decisions to rest on observed access in future, data-access logs for
+`secretmanager.googleapis.com` have to be turned on first.
+
+To re-derive the managed/live split at any time:
+
+```bash
+cd environments/multi-shared
+gcloud secrets list --project=breathe-shared --format="value(name)" \
+  | LC_ALL=C sort > /tmp/gcp.txt
+terraform state pull | python3 -c "
+import json,sys
+st=json.load(sys.stdin)
+print('\n'.join({i['attributes']['secret_id']
+     for r in st.get('resources',[]) if r.get('type')=='google_secret_manager_secret'
+     for i in r.get('instances',[])}))" | LC_ALL=C sort > /tmp/tf.txt
+LC_ALL=C comm -23 /tmp/gcp.txt /tmp/tf.txt   # live but unmanaged — should be empty
+LC_ALL=C comm -13 /tmp/gcp.txt /tmp/tf.txt   # in state but gone — should be empty
+```
+
+`LC_ALL=C` matters: without it `comm` and `sort` disagree about case and the
+comparison silently reports nonsense.
 
 Environment projects (`breathe-dev-env` and friends) hold only
 `anthropic-api-key` and `stripe-api-key`; everything else lives in
