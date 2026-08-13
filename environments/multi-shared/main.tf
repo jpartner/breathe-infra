@@ -561,6 +561,68 @@ resource "google_cloudbuild_trigger" "unifeed_pdf_dev" {
   service_account = google_service_account.cloudbuild.id
 }
 
+# Artwork pipeline services. Same shape as the five above; both deploy to dev
+# only for now. Each pushes to its own Artifact Registry repository and updates
+# its own Cloud Run service, and neither carries any secret — the services they
+# build run as identities with no IAM roles at all.
+resource "google_cloudbuild_trigger" "unifeed_render_dev" {
+  project     = var.project_id
+  name        = "unifeed-render-dev"
+  description = "Build and deploy the artwork rasteriser on push to main"
+  location    = var.region
+
+  github {
+    owner = var.github_owner
+    name  = "unifeed-render"
+
+    push {
+      branch = "^main$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+
+  substitutions = {
+    _DEPLOY_PROJECT = "breathe-dev-env"
+    _ENV_NAME       = "dev"
+    _DEPLOY_REGION  = var.region
+    _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
+    _SHARED_PROJECT = var.project_id
+    _SERVICE_NAME   = "unifeed-render"
+  }
+
+  service_account = google_service_account.cloudbuild.id
+}
+
+resource "google_cloudbuild_trigger" "unifeed_scan_dev" {
+  project     = var.project_id
+  name        = "unifeed-scan-dev"
+  description = "Build and deploy the upload scanner on push to main"
+  location    = var.region
+
+  github {
+    owner = var.github_owner
+    name  = "unifeed-scan"
+
+    push {
+      branch = "^main$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+
+  substitutions = {
+    _DEPLOY_PROJECT = "breathe-dev-env"
+    _ENV_NAME       = "dev"
+    _DEPLOY_REGION  = var.region
+    _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
+    _SHARED_PROJECT = var.project_id
+    _SERVICE_NAME   = "unifeed-scan"
+  }
+
+  service_account = google_service_account.cloudbuild.id
+}
+
 # =============================================================================
 # Terraform plan CI — plan-only, never applies
 # =============================================================================
