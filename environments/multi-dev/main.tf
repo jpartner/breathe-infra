@@ -26,13 +26,37 @@ provider "google" {
   region  = var.region
 }
 
-provider "cloudflare" {
-  api_token = var.cloudflare_api_token
+# Credentials from Secret Manager rather than the command line — see the same
+# block in multi-shared for why, and for how the variables act as bootstrap
+# overrides when the secrets do not exist yet.
+
+data "google_secret_manager_secret_version" "cloudflare_api_token" {
+  count = var.cloudflare_api_token == null ? 1 : 0
+
+  project = var.shared_project_id
+  secret  = "cloudflare-api-token"
+}
+
+data "google_secret_manager_secret_version" "unifeed_cloudflare_api_token" {
+  count = var.unifeed_cloudflare_api_token == null ? 1 : 0
+
+  project = var.shared_project_id
+  secret  = "unifeed-cloudflare-api-token"
 }
 
 provider "cloudflare" {
-  alias     = "unifeed"
-  api_token = var.unifeed_cloudflare_api_token
+  api_token = coalesce(
+    var.cloudflare_api_token,
+    one(data.google_secret_manager_secret_version.cloudflare_api_token[*].secret_data),
+  )
+}
+
+provider "cloudflare" {
+  alias = "unifeed"
+  api_token = coalesce(
+    var.unifeed_cloudflare_api_token,
+    one(data.google_secret_manager_secret_version.unifeed_cloudflare_api_token[*].secret_data),
+  )
 }
 
 # =============================================================================
@@ -500,7 +524,7 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
     service_account = google_service_account.backend.email
 
     vpc_access {
-      connector = var.vpc_connector_id
+      connector = local.vpc_connector_id
       egress    = "PRIVATE_RANGES_ONLY"
     }
 
@@ -838,7 +862,7 @@ resource "google_cloud_run_v2_job" "unifeed_catalogue_sync" {
       max_retries     = 1
 
       vpc_access {
-        connector = var.vpc_connector_id
+        connector = local.vpc_connector_id
         egress    = "PRIVATE_RANGES_ONLY"
       }
 

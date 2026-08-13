@@ -3,7 +3,11 @@
 *.tfstate.*
 *.tfstate.backup
 .terraform/
-.terraform.lock.hcl
+
+# .terraform.lock.hcl is deliberately NOT ignored. It pins provider versions to
+# exact releases and hashes, so two rebuilds from the same commit resolve the
+# same providers. Ignoring it meant a rebuild a month later could silently pick
+# up different provider versions — the quietest way to lose reproducibility.
 crash.log
 crash.*.log
 tfplan
@@ -35,3 +39,6 @@ service-account.json
 # Python bytecode from local syntax checks
 __pycache__/
 *.pyc
+
+# ...except under _archived, which is dead config kept for reference only
+environments/_archived/**/.terraform.lock.hcl

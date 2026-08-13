@@ -48,13 +48,65 @@ provider "google-beta" {
   region  = var.region
 }
 
+# ---------------------------------------------------------------------------
+# Credentials come from Secret Manager, not from the command line
+# ---------------------------------------------------------------------------
+#
+# These three used to be -var arguments every operator had to assemble by hand,
+# which is why terraform.tfvars existed and why its values lived on one laptop.
+# They are all already stored in Secret Manager, so they are read from there.
+#
+# The matching variables survive as BOOTSTRAP overrides. On a from-scratch
+# rebuild the secrets do not exist yet, and a data source for a missing secret
+# fails at plan time — so passing the variable skips the lookup entirely via
+# count. In steady state pass nothing.
+
+data "google_secret_manager_secret_version" "cloudflare_api_token" {
+  count = var.cloudflare_api_token == null ? 1 : 0
+
+  project = var.project_id
+  secret  = "cloudflare-api-token"
+}
+
+data "google_secret_manager_secret_version" "unifeed_cloudflare_api_token" {
+  count = var.unifeed_cloudflare_api_token == null ? 1 : 0
+
+  project = var.project_id
+  secret  = "unifeed-cloudflare-api-token"
+}
+
+# The Zitadel provider accepts the machine-user key inline as jwt_profile_json,
+# so the key never has to be written to disk. That removes the temp-file dance
+# from both the local recipe and the CI pipeline — and with it the chance of
+# leaving a private key lying around in /tmp or a build workspace.
+data "google_secret_manager_secret_version" "zitadel_terraform_key" {
+  count = var.unifeed_zitadel_key_path == null ? 1 : 0
+
+  project = var.project_id
+  secret  = "unifeed-zitadel-terraform-key"
+}
+
+locals {
+  cloudflare_api_token = coalesce(
+    var.cloudflare_api_token,
+    one(data.google_secret_manager_secret_version.cloudflare_api_token[*].secret_data),
+  )
+
+  unifeed_cloudflare_api_token = coalesce(
+    var.unifeed_cloudflare_api_token,
+    one(data.google_secret_manager_secret_version.unifeed_cloudflare_api_token[*].secret_data),
+  )
+
+  unifeed_zitadel_key_json = var.unifeed_zitadel_key_path != null ? file(var.unifeed_zitadel_key_path) : one(data.google_secret_manager_secret_version.zitadel_terraform_key[*].secret_data)
+}
+
 provider "cloudflare" {
-  api_token = var.cloudflare_api_token
+  api_token = local.cloudflare_api_token
 }
 
 provider "cloudflare" {
   alias     = "unifeed"
-  api_token = var.unifeed_cloudflare_api_token
+  api_token = local.unifeed_cloudflare_api_token
 }
 
 # =============================================================================
@@ -292,20 +344,58 @@ resource "google_project_iam_member" "cloudbuild_logs" {
 }
 
 # Grant environment Cloud Run service agents access to shared resources
+# Project numbers are looked up rather than supplied. They were the only input
+# multi-shared could not derive, and a hardcoded list of them goes stale
+# silently — the bindings simply stop matching the projects they are meant for.
+data "google_project" "environments" {
+  for_each = toset(var.environment_project_ids)
+
+  project_id = each.value
+}
+
 resource "google_project_iam_member" "env_ar_reader" {
-  for_each = toset(var.environment_project_numbers)
+  # Keyed by project ID, not number: for_each keys must be known at plan time,
+  # and a looked-up number is not.
+  for_each = toset(var.environment_project_ids)
 
   project = var.project_id
   role    = "roles/artifactregistry.reader"
-  member  = "serviceAccount:service-${each.value}@serverless-robot-prod.iam.gserviceaccount.com"
+  member  = "serviceAccount:service-${data.google_project.environments[each.key].number}@serverless-robot-prod.iam.gserviceaccount.com"
 }
 
 resource "google_project_iam_member" "env_vpc_user" {
-  for_each = toset(var.environment_project_numbers)
+  for_each = toset(var.environment_project_ids)
 
   project = var.project_id
   role    = "roles/vpcaccess.user"
-  member  = "serviceAccount:service-${each.value}@serverless-robot-prod.iam.gserviceaccount.com"
+  member  = "serviceAccount:service-${data.google_project.environments[each.key].number}@serverless-robot-prod.iam.gserviceaccount.com"
+}
+
+# Re-keying from project number to project ID. Without these the bindings read
+# as destroy-then-create.
+moved {
+  from = google_project_iam_member.env_ar_reader["815682864674"]
+  to   = google_project_iam_member.env_ar_reader["breathe-dev-env"]
+}
+moved {
+  from = google_project_iam_member.env_ar_reader["400245265670"]
+  to   = google_project_iam_member.env_ar_reader["breathe-staging-env"]
+}
+moved {
+  from = google_project_iam_member.env_ar_reader["375280996820"]
+  to   = google_project_iam_member.env_ar_reader["breathe-production-env"]
+}
+moved {
+  from = google_project_iam_member.env_vpc_user["815682864674"]
+  to   = google_project_iam_member.env_vpc_user["breathe-dev-env"]
+}
+moved {
+  from = google_project_iam_member.env_vpc_user["400245265670"]
+  to   = google_project_iam_member.env_vpc_user["breathe-staging-env"]
+}
+moved {
+  from = google_project_iam_member.env_vpc_user["375280996820"]
+  to   = google_project_iam_member.env_vpc_user["breathe-production-env"]
 }
 
 # =============================================================================

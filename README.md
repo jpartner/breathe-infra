@@ -39,9 +39,11 @@ breathe-infra/
 All state is stored in GCS: `gs://breathe-terraform-state/{environment}`
 
 The bucket itself is **not** managed by this repo — it is the backend that holds
-the state, so it cannot be in the state it holds. It is a prerequisite for a
-rebuild rather than an oversight; see
-[docs/rebuilding-environments.md](docs/rebuilding-environments.md).
+the state, so it cannot be in the state it holds. That makes it a prerequisite
+rather than an oversight, and
+[`scripts/bootstrap-state-bucket.sh`](scripts/bootstrap-state-bucket.sh) creates
+it. The script is idempotent, so running it against the existing bucket verifies
+settings and changes nothing.
 
 ## Deployment Order
 
@@ -55,28 +57,36 @@ but contain **no Terraform**. That is a gap waiting rather than a problem: as of
 secrets apiece — so there is nothing built outside this repo. They need writing
 before either environment goes live, not reconciling.
 
-**Can this be rebuilt from scratch?** Not unattended — four manual steps remain,
-and [docs/rebuilding-environments.md](docs/rebuilding-environments.md) lists them
-in order along with what is deliberately excluded.
+**Can this be rebuilt from scratch?** Close. Two structural steps need a human —
+creating the state bucket, and the one-off Cloud Build OAuth connection — plus
+supplying the values of secrets Terraform holds as empty containers by design.
+[docs/rebuilding-environments.md](docs/rebuilding-environments.md) has the
+sequence.
 
 ### Deploy
 
 ```bash
-cd environments/multi-shared
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your values
+./scripts/bootstrap-state-bucket.sh     # first time only; idempotent
 
-terraform init
-terraform plan
-terraform apply
+cd environments/multi-shared
+terraform init && terraform plan && terraform apply
+
+cd ../multi-dev
+terraform init && terraform plan && terraform apply
 ```
 
+**No `-var` arguments and no `terraform.tfvars`.** Credentials are read from
+Secret Manager by the config, project numbers are looked up from project IDs,
+and `multi-dev` takes its OIDC client IDs and VPC connector from `multi-shared`'s
+outputs. If either root ever needs an argument again, something has regressed.
+
 > **Read [docs/zitadel-and-terraform-variables.md](docs/zitadel-and-terraform-variables.md) before applying `multi-shared`.**
-> `terraform.tfvars` is gitignored, and the Zitadel resources are gated behind a
-> flag — an apply that omits it plans to destroy 75 identity resources including
-> production. That doc also covers which of the two near-identical `zitadel_*` /
-> `unifeed_zitadel_*` variable sets is live, and the two-phase client-ID dance
-> between `multi-shared` and `multi-dev`.
+> The Zitadel resources are gated behind `unifeed_zitadel_manage_config`, and an
+> apply that sets it to `false` plans to destroy 75 identity resources including
+> production orgs. It defaults to `true` so the common case is safe, but the doc
+> explains how the trap was reachable. It also covers which of the two
+> near-identical `zitadel_*` / `unifeed_zitadel_*` variable sets is live — the
+> single easiest thing to get wrong here.
 
 ### Continuous plan
 
@@ -147,7 +157,9 @@ drives the provider and module that manage the orgs, projects and OIDC apps. See
 ## Important
 
 - **NEVER modify `breathe-dev`** — this is the live single-tenant system
-- **NEVER commit `terraform.tfvars`** — contains project-specific values
+- **`terraform.tfvars` is not needed** — every input is defaulted, looked up,
+  or read from Secret Manager. Do not reintroduce one; if a root starts needing
+  arguments, fix the config instead
 - All changes go through Terraform — no manual GCP console changes
 - **This includes creating secrets.** `gcloud secrets create` leaves a secret
   invisible to `plan` and able to survive a destroy, and nothing warns you. On

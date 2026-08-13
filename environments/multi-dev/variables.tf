@@ -21,6 +21,7 @@ variable "shared_project_id" {
 variable "vpc_connector_id" {
   description = "VPC connector from shared project"
   type        = string
+  default     = null
 }
 
 # Database
@@ -32,11 +33,6 @@ variable "db_name" {
 variable "db_user" {
   type    = string
   default = "app"
-}
-
-variable "db_connection_name" {
-  description = "Cloud SQL instance connection name"
-  type        = string
 }
 
 # Auth
@@ -96,7 +92,7 @@ variable "cloudflare_api_token" {
   description = "Cloudflare API token with Zone:DNS:Edit for breathebranding.co.uk"
   type        = string
   sensitive   = true
-  default     = ""
+  default     = null
 }
 
 variable "cloudflare_zone_id" {
@@ -109,7 +105,7 @@ variable "unifeed_cloudflare_api_token" {
   description = "Cloudflare API token for unifeed.io DNS"
   type        = string
   sensitive   = true
-  default     = ""
+  default     = null
 }
 
 variable "unifeed_cloudflare_zone_id" {

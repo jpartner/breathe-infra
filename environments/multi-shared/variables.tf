@@ -22,11 +22,6 @@ variable "environment_project_ids" {
   default     = ["breathe-dev-env", "breathe-staging-env", "breathe-production-env"]
 }
 
-variable "environment_project_numbers" {
-  description = "List of environment project numbers (for service agent IAM)"
-  type        = list(string)
-}
-
 # Zitadel
 variable "zitadel_domain" {
   description = "Domain for Zitadel auth server"
@@ -43,7 +38,7 @@ variable "unifeed_zitadel_domain" {
 variable "unifeed_zitadel_key_path" {
   description = "Path to Unifeed Zitadel service account JSON key"
   type        = string
-  default     = ""
+  default     = null
 }
 
 variable "unifeed_zitadel_manage_config" {
@@ -68,7 +63,7 @@ variable "unifeed_cloudflare_api_token" {
   description = "Cloudflare API token for unifeed.io DNS management"
   type        = string
   sensitive   = true
-  default     = ""
+  default     = null
 }
 
 variable "zitadel_service_account_key_path" {
@@ -152,7 +147,7 @@ variable "cloudflare_api_token" {
   description = "Cloudflare API token with Zone:DNS:Edit for breathebranding.co.uk"
   type        = string
   sensitive   = true
-  default     = ""
+  default     = null
 }
 
 variable "cloudflare_zone_id" {

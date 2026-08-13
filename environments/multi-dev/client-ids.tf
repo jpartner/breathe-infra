@@ -35,6 +35,9 @@ locals {
   shared_customer_client_ids = data.terraform_remote_state.shared.outputs.unifeed_customer_client_ids
   shared_admin_client_ids    = data.terraform_remote_state.shared.outputs.unifeed_admin_client_ids
 
+  # Also published by multi-shared, so there is no reason to pass them in.
+  vpc_connector_id = coalesce(var.vpc_connector_id, data.terraform_remote_state.shared.outputs.vpc_connector_id)
+
   # Storefront (customer-facing) OIDC clients, keyed by storefront name.
   storefront_client_ids = {
     breathe = coalesce(var.storefront_breathe_client_id, local.shared_customer_client_ids["breathe-dev"])

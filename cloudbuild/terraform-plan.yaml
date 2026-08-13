@@ -50,15 +50,6 @@
 timeout: 1800s
 
 substitutions:
-  # Project numbers for the environment projects, in the order multi-shared
-  # expects. Source: docs/zitadel-and-terraform-variables.md §8.
-  #
-  # Referenced below as ${_ENV_PROJECT_NUMBERS} — a single $, so Cloud Build
-  # substitutes it. Secret env vars use $$ instead, which escapes to a literal
-  # $ and defers to the shell. Getting the two mixed up fails the build at
-  # validation ("key ... is not matched in the template") rather than at run
-  # time, which is the good outcome.
-  _ENV_PROJECT_NUMBERS: '["815682864674","400245265670","375280996820"]'
   _TF_VERSION: '1.15.8'
   # Same channel the build notifier posts to.
   _SLACK_CHANNEL: 'C0BPQ4R7HC6'
@@ -69,80 +60,43 @@ options:
 
 availableSecrets:
   secretManager:
-    # NOTE: unifeed-zitadel-terraform-key, NOT zitadel-service-account-key.
-    # The latter is the legacy Breathe-era key and fails with a generic
-    # HTTP 500 Errors.Internal that reads like a broken server (docs §3).
-    - versionName: projects/breathe-shared/secrets/unifeed-zitadel-terraform-key/versions/latest
-      env: 'ZITADEL_KEY'
-    - versionName: projects/breathe-shared/secrets/unifeed-cloudflare-api-token/versions/latest
-      env: 'UNIFEED_CF_TOKEN'
-    - versionName: projects/breathe-shared/secrets/cloudflare-api-token/versions/latest
-      env: 'CF_TOKEN'
+    # Terraform reads its own credentials — the Zitadel machine key and both
+    # Cloudflare tokens — from Secret Manager itself, so the only secret this
+    # pipeline handles is the one for reporting. The Zitadel key is passed to
+    # the provider inline as jwt_profile_json and never touches the workspace
+    # filesystem, which removed a step that wrote a private key to disk.
     - versionName: projects/breathe-shared/secrets/slack-bot-token/versions/latest
       env: 'SLACK_TOKEN'
 
 steps:
-  # ---------------------------------------------------------------------------
-  # The Zitadel provider authenticates from a JSON key file on disk, so the
-  # secret has to be materialised rather than passed as a variable.
-  # ---------------------------------------------------------------------------
-  - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'materialise-zitadel-key'
-    entrypoint: 'bash'
-    secretEnv: ['ZITADEL_KEY']
-    args:
-      - '-c'
-      - |
-        set -euo pipefail
-        umask 077
-        printf '%s' "$$ZITADEL_KEY" > /workspace/zitadel-key.json
-        # Fail early and legibly if the key is not valid JSON — an expired or
-        # rotated secret otherwise surfaces as an opaque provider error deep in
-        # the refresh.
-        python3 -c "import json;json.load(open('/workspace/zitadel-key.json'))"
-        echo "Zitadel key materialised ($(wc -c < /workspace/zitadel-key.json) bytes)"
-
   - name: 'hashicorp/terraform:${_TF_VERSION}'
     id: 'plan-multi-shared'
     entrypoint: 'sh'
-    secretEnv: ['UNIFEED_CF_TOKEN', 'CF_TOKEN']
     args:
       - '-c'
       - |
         set -eu
         cd environments/multi-shared
         terraform init -input=false -no-color
-        # unifeed_zitadel_manage_config is passed explicitly even though it now
-        # defaults to true: the §1 trap was a *partial* invocation, and being
-        # explicit here means the pipeline cannot drift into that shape.
+        # No -var arguments. Every input is either defaulted, derived from a
+        # data source, or read from Secret Manager by the config itself. If this
+        # command ever needs an argument again, the config has regressed.
         terraform plan -input=false -no-color -lock=false \
-          -out=/workspace/multi-shared.tfplan \
-          -var 'environment_project_numbers=${_ENV_PROJECT_NUMBERS}' \
-          -var 'unifeed_zitadel_manage_config=true' \
-          -var 'unifeed_zitadel_key_path=/workspace/zitadel-key.json' \
-          -var "unifeed_cloudflare_api_token=$$UNIFEED_CF_TOKEN" \
-          -var "cloudflare_api_token=$$CF_TOKEN"
+          -out=/workspace/multi-shared.tfplan
         terraform show -json /workspace/multi-shared.tfplan > /workspace/multi-shared.json
 
   - name: 'hashicorp/terraform:${_TF_VERSION}'
     id: 'plan-multi-dev'
     entrypoint: 'sh'
-    secretEnv: ['UNIFEED_CF_TOKEN', 'CF_TOKEN']
     args:
       - '-c'
       - |
         set -eu
         cd environments/multi-dev
         terraform init -input=false -no-color
-        # multi-dev's only two variables without defaults. terraform.tfvars is
-        # gitignored and terraform.tfvars.example is stale (it names breathe-db;
-        # the live instance is breathe-multi-db), so these are passed directly.
+        # Reads the client IDs and the VPC connector from multi-shared's state.
         terraform plan -input=false -no-color -lock=false \
-          -out=/workspace/multi-dev.tfplan \
-          -var 'vpc_connector_id=projects/breathe-shared/locations/europe-west2/connectors/breathe-vpc-connector' \
-          -var 'db_connection_name=breathe-shared:europe-west2:breathe-multi-db' \
-          -var "unifeed_cloudflare_api_token=$$UNIFEED_CF_TOKEN" \
-          -var "cloudflare_api_token=$$CF_TOKEN"
+          -out=/workspace/multi-dev.tfplan
         terraform show -json /workspace/multi-dev.tfplan > /workspace/multi-dev.json
 
   # ---------------------------------------------------------------------------
@@ -300,11 +254,6 @@ steps:
             print("\nFAILED: this plan proposes destroying resources.")
             sys.exit(1)
         print("\nOK: no destroys proposed.")
-
-  - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'shred-key'
-    entrypoint: 'bash'
-    args: ['-c', 'shred -u /workspace/zitadel-key.json 2>/dev/null || rm -f /workspace/zitadel-key.json; echo done']
 
 # Deliberately no `artifacts:` block. `terraform show -json` embeds the values
 # of sensitive attributes, and 15 google_secret_manager_secret_version resources

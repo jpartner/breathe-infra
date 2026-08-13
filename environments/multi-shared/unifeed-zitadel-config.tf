@@ -6,7 +6,7 @@ provider "zitadel" {
   domain           = var.unifeed_zitadel_domain
   port             = "443"
   insecure         = false
-  jwt_profile_file = var.unifeed_zitadel_key_path
+  jwt_profile_json = local.unifeed_zitadel_key_json
 }
 
 module "unifeed_zitadel_config" {
