@@ -25,4 +25,12 @@ resource "zitadel_smtp_config" "unifeed" {
   sender_address = var.zitadel_smtp_sender
   sender_name    = "Unifeed"
   set_active     = true
+
+  # Declared empty on purpose. Left undeclared, Terraform stores null while
+  # Zitadel returns "", and the refresh reports the resource as drifted on every
+  # single plan — state=None, live="". No one changed anything; it is a
+  # null-versus-empty-string round trip. Setting it explicitly makes the two
+  # agree. Give it a real address if replies should go somewhere other than
+  # the sender.
+  reply_to_address = ""
 }

@@ -103,9 +103,12 @@ resource "google_sql_database_instance" "main" {
     tier              = var.db_tier
     availability_type = "ZONAL"
     edition           = "ENTERPRISE"
-    disk_size         = 10
     disk_type         = "PD_SSD"
     disk_autoresize   = true
+
+    # Initial size only — see the lifecycle block. Once GCP has grown the disk
+    # this value stops being the truth, and Terraform must not act on it.
+    disk_size = 10
 
     ip_configuration {
       ipv4_enabled                                  = false
@@ -127,6 +130,21 @@ resource "google_sql_database_instance" "main" {
 
   deletion_protection = false # Set true for production
 
+  lifecycle {
+    ignore_changes = [
+      # disk_autoresize is on, so GCP grows this disk on its own. Left
+      # unignored, the next plan sees live 20GB against a declared 10 and
+      # proposes shrinking it — which Cloud SQL rejects outright. The result is
+      # a plan that looks fine and an apply that fails on the primary database,
+      # at whatever moment the disk happened to grow.
+      #
+      # The trade: Terraform can no longer *raise* the size either. Growing the
+      # disk deliberately means removing this line for that apply, or doing it
+      # in the console and letting autoresize keep it. Given the disk only ever
+      # grows automatically here, that is the better side of the trade.
+      settings[0].disk_size,
+    ]
+  }
 }
 
 # Databases
@@ -706,6 +724,13 @@ resource "google_cloud_run_v2_service" "unifeed_test_runner" {
       template[0].containers[0].image,
       template[0].labels,
       labels,
+      # Cloud Run records which tool last wrote the service. Every deploy in
+      # this org runs `gcloud run services update`, so these become "gcloud"
+      # and Terraform then plans to set them back to null — a change that does
+      # nothing and that the next deploy undoes. Left unignored it is a
+      # permanent one-resource diff on every plan.
+      client,
+      client_version,
     ]
   }
 

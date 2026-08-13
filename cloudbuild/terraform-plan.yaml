@@ -178,6 +178,17 @@ steps:
           | traffic\[\] .* | traffic_statuses\[\] .*
           | effective_labels .* | terraform_labels .*
           | template\[\]\.containers\[\]\.image
+            # Cloud Run's record of which tool last wrote the service. Every
+            # deploy here is `gcloud run services update`, so it always reads
+            # "gcloud" — a fact about the deploy model, not a change anyone made.
+          | client | client_version
+            # Cloud SQL's optimistic-concurrency counter. It increments on any
+            # settings write, including Google's own maintenance activity, and
+            # carries no information about what changed. Checked against the
+            # live instance: it moved 69 -> 70 with no other attribute differing.
+            # NOT filtered, deliberately: maintenance_version (Google's minor
+            # version patches, worth knowing about) and disk_size.
+          | settings\[\]\.version
         )$""", re.X)
 
         def flatten(value, prefix=""):
