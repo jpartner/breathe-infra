@@ -203,28 +203,42 @@ tenant's project for that environment; the backend enforces `hasAnyRole("ADMIN",
 UI but every request 401s, which looks like a broken proxy rather than a missing
 grant. Roles are granted with `zitadel_user_grant`.
 
-## 6. Client IDs are a two-phase apply
+## 6. Client IDs flow between the two states automatically
 
 `multi-shared` creates the OIDC applications; `multi-dev` consumes their client
-IDs through variables whose **defaults hold the real values**
-(`storefront_*_client_id`, `admin_*_client_id` in
-`environments/multi-dev/variables.tf`).
+IDs. Since 2026-08-13 it reads them straight from `multi-shared`'s outputs
+through a `terraform_remote_state` data source
+(`environments/multi-dev/client-ids.tf`). The order is simply: apply
+`multi-shared`, then apply `multi-dev`.
 
-So the order is:
+**This used to be a manual step and no longer is.** The six
+`storefront_*_client_id` / `admin_*_client_id` variables held the real IDs in
+their **defaults**, so the procedure was: apply `multi-shared`, run
+`terraform output -json`, hand-edit `environments/multi-dev/variables.tf`, then
+apply `multi-dev`. Forgetting the edit mattered most exactly when it was easiest
+to forget — an apply that **replaces** an application rather than updating it in
+place (changing `app_type` forces replacement) issues a new client ID, and a
+stale one produces a login failure that looks like a misconfigured tenant rather
+than a missed step.
 
-1. Apply `multi-shared`.
-2. Read the IDs back:
-   ```bash
-   terraform output -json unifeed_admin_client_ids
-   terraform output -json unifeed_customer_client_ids
-   ```
-3. Update the corresponding defaults in `environments/multi-dev/variables.tf`.
-4. Apply `multi-dev`.
+The variables still exist, defaulting to `null`, purely so an ID can be pinned by
+hand if it ever needs to be. Left alone they come from the other state, so
+there is nothing to refresh after an application is replaced.
 
-Step 3 is easy to forget and matters whenever an apply **replaces** an
-application rather than updating it in place — changing `app_type`, for example,
-forces replacement and issues a new client ID. A stale ID produces a login
-failure that looks like a misconfigured tenant.
+Two things worth knowing about the wiring:
+
+- Both outputs are keyed `"<zitadel-tenant>-<env>"`, and the tenant key for the
+  Uniten deployment is **`unifeed`**, not `uniten` (§4). The mapping is written
+  out explicitly in `client-ids.tf` rather than derived from the slug, because
+  deriving it produces a key that does not exist and a failure that reads like a
+  Zitadel bug.
+- If `multi-shared` was last applied with `unifeed_zitadel_manage_config = false`
+  both outputs are empty maps. A `check` block catches that and says so, rather
+  than failing on a missing map key.
+
+Reading the other state needs read access to the `multi-shared` prefix in
+`gs://breathe-terraform-state`. Operators have it; CI has it through
+`sa-terraform-plan`'s `objectViewer` grant on the bucket.
 
 ## 7. Secret inventory — and what Terraform actually owns
 

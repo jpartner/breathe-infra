@@ -46,18 +46,18 @@ rebuild rather than an oversight; see
 ## Deployment Order
 
 1. **multi-shared** first (networking, Artifact Registry, Zitadel, Cloud Build)
-2. **multi-dev** (can deploy after shared is up), which needs a manual
-   client-ID step in between — see §6 of the Zitadel doc
+2. **multi-dev** — OIDC client IDs flow from `multi-shared`'s outputs
+   automatically, so the two applies are all that is needed (§6)
 
 `environments/multi-staging` and `environments/multi-prod` exist as directories
-but contain **no Terraform at all**. Whatever runs in `breathe-staging-env` and
-`breathe-production-env` was not built from this repo and cannot currently be
-rebuilt from it. Nothing errors to tell you this: plans pass and drift is zero,
-because both environments are simply outside the system.
+but contain **no Terraform**. That is a gap waiting rather than a problem: as of
+2026-08-13 both projects are empty — no Cloud Run services, no Cloud SQL, two
+secrets apiece — so there is nothing built outside this repo. They need writing
+before either environment goes live, not reconciling.
 
-**Can this be rebuilt from scratch?** Not unattended — there are five manual
-steps, and [docs/rebuilding-environments.md](docs/rebuilding-environments.md)
-lists them in order, worst first, along with what is deliberately excluded.
+**Can this be rebuilt from scratch?** Not unattended — four manual steps remain,
+and [docs/rebuilding-environments.md](docs/rebuilding-environments.md) lists them
+in order along with what is deliberately excluded.
 
 ### Deploy
 

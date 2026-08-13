@@ -25,6 +25,11 @@ None of that means an environment can be rebuilt unattended. Managed is not the
 same as reproducible: Terraform knowing a secret exists says nothing about
 whether a rebuild can put the right value in it.
 
+`multi-staging` and `multi-prod` have no Terraform, but both projects are empty
+as of 2026-08-13 — no Cloud Run, no Cloud SQL, two secrets apiece. Nothing has
+been built outside this repo; those environments simply have not been written
+yet.
+
 ## 2. What a from-scratch rebuild actually needs
 
 In order. Steps marked **MANUAL** cannot currently be done by Terraform.
@@ -45,47 +50,31 @@ In order. Steps marked **MANUAL** cannot currently be done by Terraform.
    Cloudflare tokens.
 3. Apply `multi-shared`. This creates the projects, networking, Cloud SQL,
    Artifact Registry, Zitadel and its config, and all 50 secret containers.
-4. **MANUAL — hand-edit client IDs into `multi-dev`.** See §6. Read
-   `terraform output -json` from `multi-shared` and paste the OIDC client IDs
-   into the variable **defaults** in `environments/multi-dev/variables.tf`. This
-   is the single worst step: it is an edit to a tracked source file in the middle
-   of a deploy, so a rebuild produces a dirty working tree as a side effect.
-5. **MANUAL — populate 25 secret values.** The adopted secrets are managed as
+4. **MANUAL — populate 25 secret values.** The adopted secrets are managed as
    containers only, so a rebuild creates them empty. Supplier API keys come from
    third parties and cannot be regenerated at all; they must be retrieved from
    wherever they are held and added with `gcloud secrets versions add`. This is a
    deliberate trade — managing the versions would put third-party credentials in
    the state file — but it is a real limit on unattended rebuild.
-6. Apply `multi-dev`.
-7. **MANUAL — connect the repo to Cloud Build.** Triggers are declared in
+5. Apply `multi-dev`. Its OIDC client IDs come from `multi-shared`'s outputs
+   automatically (§6) — this was a manual hand-edit until 2026-08-13.
+6. **MANUAL — connect the repo to Cloud Build.** Triggers are declared in
    Terraform, but the GitHub App connection they depend on is an interactive
    OAuth flow. Applying a `google_cloudbuild_trigger` for an unconnected repo
    fails with `Error 400: Repository mapping does not exist`. Connect at
    `console.cloud.google.com/cloud-build/triggers` first.
-8. **MANUAL — grant the CI service account out of band, once.** The config
+7. **MANUAL — grant the CI service account out of band, once.** The config
    manages the IAM of the very service account that CI uses, so the first grant
    has to come from somewhere else. After that Terraform keeps it in sync.
 
 ## 3. The gaps, worst first
 
-1. **The client-ID hand-edit (§6).** The only manual step that edits tracked
-   source. It is also the most tractable: `multi-dev` could read the IDs from
-   `multi-shared`'s outputs through a `terraform_remote_state` data source,
-   turning a documented ritual into an ordinary dependency and removing step 4
-   entirely.
-2. **`multi-staging` and `multi-prod` are empty directories.** Two of the four
-   environments the README describes have no Terraform at all — `ls` them and
-   you get nothing. Whatever exists in `breathe-staging-env` and
-   `breathe-production-env` was not built from this repo and cannot be rebuilt
-   from it. This is the largest gap by consequence and the least visible, because
-   nothing errors: plans pass, drift is zero, and both environments are simply
-   outside the system.
-3. **Secret values (step 5).** Partly irreducible — nobody can regenerate a
+1. **Secret values (step 4).** Partly irreducible — nobody can regenerate a
    supplier's API key — but the *list* of what must be supplied should live
    somewhere better than this paragraph.
-4. **`terraform.tfvars` values on one laptop (step 2).** A bus-factor problem
+2. **`terraform.tfvars` values on one laptop (step 2).** A bus-factor problem
    more than a rebuild problem, since §8 documents how to derive them.
-5. **`.terraform.lock.hcl` is gitignored** (`.gitignore:6`), so provider
+3. **`.terraform.lock.hcl` is gitignored** (`.gitignore:6`), so provider
    versions are not pinned reproducibly. Two rebuilds a month apart can resolve
    different provider versions from the same commit. Committing the lock file
    would fix this outright.

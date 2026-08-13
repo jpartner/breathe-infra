@@ -46,12 +46,6 @@ variable "auth_issuer_url" {
   default     = ""
 }
 
-variable "zitadel_admin_client_id" {
-  description = "Zitadel OIDC client ID for admin app"
-  type        = string
-  default     = "383218689803110726"
-}
-
 variable "unifeed_zitadel_issuer" {
   description = "Unifeed Zitadel OIDC issuer URL"
   type        = string
@@ -61,39 +55,40 @@ variable "unifeed_zitadel_issuer" {
 variable "storefront_breathe_client_id" {
   description = "Zitadel customer OIDC client ID for Breathe storefront (dev)"
   type        = string
-  default     = "384307380713795084"
+  default     = null
 }
 
 variable "storefront_pa_client_id" {
   description = "Zitadel customer OIDC client ID for PA storefront (dev)"
   type        = string
-  default     = "384307382844501516"
+  default     = null
 }
 
 variable "storefront_uniten_client_id" {
   description = "Zitadel customer OIDC client ID for Uniten storefront (dev)"
   type        = string
-  default     = "384307981908553228"
+  default     = null
 }
 
-# Admin UI OIDC client IDs — from the unifeed_admin_client_ids output of
-# multi-shared. Refresh these if that apply replaces the admin applications.
+# OIDC client IDs are read from multi-shared's outputs in client-ids.tf. These
+# variables exist only to pin one by hand; left null they come from that state,
+# so there is nothing to refresh after multi-shared replaces an application.
 variable "admin_breathe_client_id" {
   description = "Zitadel admin UI OIDC client ID for Breathe (dev)"
   type        = string
-  default     = "384307387441458700"
+  default     = null
 }
 
 variable "admin_pa_client_id" {
   description = "Zitadel admin UI OIDC client ID for PA (dev)"
   type        = string
-  default     = "384307386954919436"
+  default     = null
 }
 
 variable "admin_uniten_client_id" {
   description = "Zitadel admin UI OIDC client ID for Uniten (dev)"
   type        = string
-  default     = "384307985482100236"
+  default     = null
 }
 
 # Cloudflare

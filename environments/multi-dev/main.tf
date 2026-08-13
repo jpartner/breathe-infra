@@ -1197,7 +1197,7 @@ resource "google_cloud_run_v2_service" "storefront_breathe" {
       }
       env {
         name  = "AUTH_ZITADEL_ID"
-        value = var.storefront_breathe_client_id
+        value = local.storefront_client_ids.breathe
       }
       env {
         name = "AUTH_SECRET"
@@ -1285,7 +1285,7 @@ resource "google_cloud_run_v2_service" "storefront_breathe_eu" {
       }
       env {
         name  = "AUTH_ZITADEL_ID"
-        value = var.storefront_breathe_client_id
+        value = local.storefront_client_ids.breathe
       }
       env {
         name = "AUTH_SECRET"
@@ -1373,7 +1373,7 @@ resource "google_cloud_run_v2_service" "storefront_pa" {
       }
       env {
         name  = "AUTH_ZITADEL_ID"
-        value = var.storefront_pa_client_id
+        value = local.storefront_client_ids.pa
       }
       env {
         name = "AUTH_SECRET"
@@ -1465,7 +1465,7 @@ resource "google_cloud_run_v2_service" "storefront_uniten" {
       }
       env {
         name  = "AUTH_ZITADEL_ID"
-        value = var.storefront_uniten_client_id
+        value = local.storefront_client_ids.uniten
       }
       env {
         name = "AUTH_SECRET"
@@ -1556,12 +1556,6 @@ locals {
     pa      = "pa"
   }
 
-  # Zitadel admin UI OIDC clients, keyed by admin deployment slug
-  admin_client_ids = {
-    uniten  = var.admin_uniten_client_id
-    breathe = var.admin_breathe_client_id
-    pa      = var.admin_pa_client_id
-  }
 }
 
 locals {
