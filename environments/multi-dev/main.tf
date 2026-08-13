@@ -535,6 +535,23 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
         name  = "PDF_SERVICE_URL"
         value = google_cloud_run_v2_service.unifeed_pdf.uri
       }
+
+      # Artwork pipeline. Taken from the resources rather than written out, so
+      # they cannot go stale if a service is recreated and gets a new run.app
+      # host — which is exactly what happened to the PA lookup service today.
+      #
+      # Without these the backend never calls either service and fails closed:
+      # uploads stay PENDING and downloads return 202 forever. sa-backend holds
+      # run.invoker on both and presents an ID token; neither service is
+      # reachable any other way.
+      env {
+        name  = "UNIFEED_SCAN_BASE_URL"
+        value = google_cloud_run_v2_service.unifeed_scan.uri
+      }
+      env {
+        name  = "UNIFEED_RENDER_BASE_URL"
+        value = google_cloud_run_v2_service.unifeed_render.uri
+      }
       env {
         name = "WORKER_API_KEY"
         value_source {
@@ -1855,6 +1872,47 @@ resource "google_service_account_iam_member" "scheduler_act_as_backend" {
   service_account_id = google_service_account.backend.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+}
+
+# Deletes staged customer uploads that were never promoted to real artwork.
+# This is what actually bounds the uploads/ prefix to the 24h the application
+# advertises; the 48h GCS lifecycle rule on unifeed-dev-files is the backstop for
+# when this does not run, not the primary control.
+#
+# Hourly rather than daily: the upload endpoint is public and unauthenticated,
+# so the window between sweeps is the window in which junk accumulates.
+#
+# Deliberately sends no OIDC token, matching the notification cleanup job below.
+# An OIDC token was tried first and produced 401 UNAUTHENTICATED: the backend's
+# JWT filter validates any Authorization header as a Zitadel token and rejects
+# a Google-signed one, so authenticating makes the call fail rather than
+# succeed. Verified directly — the same endpoint returns 404 with no header and
+# 401 with one.
+#
+# That means these /internal endpoints are unauthenticated on a service that
+# still carries allUsers, which is a real exposure and is tracked with the
+# wider ingress lockdown. Adding OIDC here is only possible once the backend
+# accepts Google-issued tokens on /internal.
+resource "google_cloud_scheduler_job" "staged_upload_sweep" {
+  name        = "staged-upload-sweep"
+  project     = var.project_id
+  region      = var.region
+  description = "Hourly deletion of expired unpromoted customer uploads"
+  schedule    = "0 * * * *"
+  time_zone   = "UTC"
+
+  http_target {
+    uri         = "${google_cloud_run_v2_service.unifeed_backend.uri}/internal/staged-uploads/sweep"
+    http_method = "POST"
+  }
+
+  # A missed sweep is caught by the next hour, and by the lifecycle rule beyond
+  # that, so there is no value in retrying hard.
+  retry_config {
+    retry_count = 1
+  }
+
+  depends_on = [google_project_service.apis]
 }
 
 resource "google_cloud_scheduler_job" "notification_retention_cleanup" {
