@@ -422,7 +422,7 @@ moved {
 resource "google_cloudbuild_trigger" "pa_migration_dev" {
   project     = var.project_id
   name        = "pa-migration-dev"
-  description = "Build and deploy PA migration service to dev on push to main"
+  description = "Build and deploy the PA legacy lookup service on push to main"
   location    = var.region
 
   github {
@@ -437,8 +437,11 @@ resource "google_cloudbuild_trigger" "pa_migration_dev" {
   filename = "cloudbuild.yaml"
 
   substitutions = {
-    _DEPLOY_PROJECT = "breathe-dev-env"
-    _ENV_NAME       = "dev"
+    # The service moved to the shared project on 2026-08-13. Without this the
+    # next push would deploy it back into breathe-dev-env, recreating the copy
+    # Terraform deleted, with nothing to say why it reappeared.
+    _DEPLOY_PROJECT = "breathe-shared"
+    _ENV_NAME       = "shared"
     _DEPLOY_REGION  = var.region
     _AR_HOSTNAME    = "${var.region}-docker.pkg.dev"
     _SHARED_PROJECT = var.project_id

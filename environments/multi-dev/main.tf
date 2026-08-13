@@ -417,152 +417,11 @@ resource "google_kms_crypto_key_iam_member" "backend_kms" {
 # PA Migration — read-only legacy data lookup service
 # =============================================================================
 
-resource "google_service_account" "pa_migration" {
-  project      = var.project_id
-  account_id   = "sa-pa-migration"
-  display_name = "PA Migration Service Account"
-  description  = "Service account for PA legacy lookup Cloud Run service"
-}
-
-resource "google_secret_manager_secret_iam_member" "pa_migration_api_key" {
-  project   = var.shared_project_id
-  secret_id = "pa-migration-api-key"
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.pa_migration.email}"
-}
-
-resource "google_secret_manager_secret_iam_member" "pa_migration_breathe_db_password" {
-  project   = var.shared_project_id
-  secret_id = "breathe-legacy-db-password"
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.pa_migration.email}"
-}
-
-resource "google_cloud_run_v2_service" "pa_migration" {
-  name     = "pa-migration"
-  project  = var.project_id
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
-
-  lifecycle {
-    ignore_changes = [
-      template[0].containers[0].image,
-      template[0].labels,
-      labels,
-    ]
-  }
-
-  template {
-    service_account = google_service_account.pa_migration.email
-
-    scaling {
-      min_instance_count = 0
-      max_instance_count = 2
-    }
-
-    containers {
-      image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/pa-migration/pa-migration:latest"
-
-      ports { container_port = 8080 }
-
-      resources {
-        limits = {
-          cpu    = "1"
-          memory = "512Mi"
-        }
-        cpu_idle          = true
-        startup_cpu_boost = true
-      }
-
-      env {
-        name = "PA_LEGACY_API_KEY"
-        value_source {
-          secret_key_ref {
-            secret  = "projects/${var.shared_project_id}/secrets/pa-migration-api-key"
-            version = "latest"
-          }
-        }
-      }
-
-      # Breathe legacy source: read-only lookups against the live Breathe
-      # Postgres over the Cloud SQL socket, served under /breathe
-      env {
-        name  = "BREATHE_SQL_INSTANCE"
-        value = var.breathe_sql_connection_name
-      }
-      env {
-        name  = "BREATHE_DB_NAME"
-        value = "breathe_prod"
-      }
-      env {
-        name  = "BREATHE_DB_USER"
-        value = "legacy_lookup" # read-only role: SELECT only, created 2026-08-11
-      }
-      env {
-        name = "BREATHE_DB_PASSWORD"
-        value_source {
-          secret_key_ref {
-            secret  = "projects/${var.shared_project_id}/secrets/breathe-legacy-db-password"
-            version = "latest"
-          }
-        }
-      }
-
-      volume_mounts {
-        name       = "cloudsql"
-        mount_path = "/cloudsql"
-      }
-
-      startup_probe {
-        http_get {
-          path = "/health"
-          port = 8080
-        }
-        initial_delay_seconds = 2
-        timeout_seconds       = 3
-        period_seconds        = 5
-        failure_threshold     = 5
-      }
-    }
-
-    volumes {
-      name = "cloudsql"
-      cloud_sql_instance {
-        instances = [var.breathe_sql_connection_name]
-      }
-    }
-
-    timeout = "60s"
-  }
-
-  labels = {
-    environment = var.environment
-    managed_by  = "terraform"
-  }
-
-  depends_on = [google_project_service.apis]
-}
-
 resource "google_secret_manager_secret_iam_member" "backend_staff_manager_pat" {
   project   = var.shared_project_id
   secret_id = "unifeed-staff-manager-pat"
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.backend.email}"
-}
-
-# The lookup service reads the live Breathe DB (read-only SELECTs)
-resource "google_project_iam_member" "pa_migration_breathe_sql" {
-  project = var.breathe_live_project_id
-  role    = "roles/cloudsql.client"
-  member  = "serviceAccount:${google_service_account.pa_migration.email}"
-}
-
-resource "google_cloud_run_v2_service_iam_member" "pa_migration_public" {
-  project  = var.project_id
-  location = var.region
-  name     = google_cloud_run_v2_service.pa_migration.name
-  role     = "roles/run.invoker"
-  member   = "allUsers"
 }
 
 # =============================================================================
@@ -1654,9 +1513,12 @@ locals {
     breathe = "admin.dev.breathebranding.co.uk"
   }
 
+  # The PA legacy lookup moved to the shared project on 2026-08-13 — there is
+  # one of it, reading one live legacy database. Reached by hostname because it
+  # is no longer a resource in this state.
   legacy_lookup_urls = {
-    pa      = google_cloud_run_v2_service.pa_migration.uri
-    breathe = "${google_cloud_run_v2_service.pa_migration.uri}/breathe"
+    pa      = "https://pa-migration.unifeed.io"
+    breathe = "https://pa-migration.unifeed.io/breathe"
   }
 }
 
@@ -1801,10 +1663,6 @@ module "dev_lb" {
       cloud_run_service = google_cloud_run_v2_service.unifeed_backend.name
       region            = var.region
     }
-    pa = {
-      cloud_run_service = google_cloud_run_v2_service.pa_migration.name
-      region            = var.region
-    }
     storefront-breathe = {
       cloud_run_service = google_cloud_run_v2_service.storefront_breathe.name
       region            = var.region
@@ -1840,10 +1698,6 @@ module "dev_lb" {
       hosts   = ["api.dev.unifeed.io"]
       backend = "unifeed-api"
     }
-    pa = {
-      hosts   = ["pa.dev.breathebranding.co.uk"]
-      backend = "pa"
-    }
     storefront-breathe = {
       hosts   = ["shop.dev.breathebranding.co.uk"]
       backend = "storefront-breathe"
@@ -1878,7 +1732,6 @@ module "dev_lb" {
 
   domains = [
     "api.dev.unifeed.io",
-    "pa.dev.breathebranding.co.uk",
     "shop.dev.breathebranding.co.uk",
     "admin-uniten.dev.unifeed.io",
     "admin-pa.dev.unifeed.io",
@@ -1895,7 +1748,6 @@ module "dev_lb" {
 
 resource "cloudflare_record" "dev_services" {
   for_each = {
-    "pa.dev"    = "pa.dev"
     "shop.dev"  = "shop.dev"
     "admin.dev" = "admin.dev"
   }
