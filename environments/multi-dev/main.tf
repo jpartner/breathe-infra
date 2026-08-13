@@ -265,6 +265,30 @@ resource "google_storage_bucket" "files" {
     }
   }
 
+  # Files a scan judged malicious. They are kept rather than deleted on sight:
+  # 90 days is long enough to investigate an incident, tell a customer what they
+  # uploaded, or establish that a detection was a false positive — after which
+  # keeping hostile files serves nobody.
+  #
+  # Same two constraints as uploads/ and for the same reasons: the prefix leads,
+  # because GCS lifecycle has no mid-path wildcard and a per-tenant rule would
+  # mean a new tenant's quarantine is silently retained forever; and it is not
+  # an environment name.
+  #
+  # Nothing should ever serve from this prefix. It exists so that a file which
+  # failed a scan is somewhere other than where clean files live, and the
+  # separation is what makes "never serve quarantined files" enforceable rather
+  # than a rule someone has to remember.
+  lifecycle_rule {
+    condition {
+      age            = 90
+      matches_prefix = ["quarantine/"]
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
   labels = {
     environment = var.environment
     managed_by  = "terraform"

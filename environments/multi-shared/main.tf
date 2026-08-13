@@ -287,6 +287,7 @@ resource "google_artifact_registry_repository" "images" {
     "unifeed-test"       = "E2E test runner and deploy hub"
     "unifeed-pdf"        = "Unifeed PDF service"
     "unifeed-render"     = "Artwork rasteriser for thumbnails"
+    "unifeed-scan"       = "ClamAV upload scanner"
   }
 
   project       = var.project_id
