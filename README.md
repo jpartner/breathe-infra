@@ -38,11 +38,26 @@ breathe-infra/
 
 All state is stored in GCS: `gs://breathe-terraform-state/{environment}`
 
+The bucket itself is **not** managed by this repo — it is the backend that holds
+the state, so it cannot be in the state it holds. It is a prerequisite for a
+rebuild rather than an oversight; see
+[docs/rebuilding-environments.md](docs/rebuilding-environments.md).
+
 ## Deployment Order
 
 1. **multi-shared** first (networking, Artifact Registry, Zitadel, Cloud Build)
-2. **multi-dev** (can deploy after shared is up)
-3. **multi-staging** / **multi-prod** (same structure as dev)
+2. **multi-dev** (can deploy after shared is up), which needs a manual
+   client-ID step in between — see §6 of the Zitadel doc
+
+`environments/multi-staging` and `environments/multi-prod` exist as directories
+but contain **no Terraform at all**. Whatever runs in `breathe-staging-env` and
+`breathe-production-env` was not built from this repo and cannot currently be
+rebuilt from it. Nothing errors to tell you this: plans pass and drift is zero,
+because both environments are simply outside the system.
+
+**Can this be rebuilt from scratch?** Not unattended — there are five manual
+steps, and [docs/rebuilding-environments.md](docs/rebuilding-environments.md)
+lists them in order, worst first, along with what is deliberately excluded.
 
 ### Deploy
 
@@ -134,4 +149,9 @@ drives the provider and module that manage the orgs, projects and OIDC apps. See
 - **NEVER modify `breathe-dev`** — this is the live single-tenant system
 - **NEVER commit `terraform.tfvars`** — contains project-specific values
 - All changes go through Terraform — no manual GCP console changes
+- **This includes creating secrets.** `gcloud secrets create` leaves a secret
+  invisible to `plan` and able to survive a destroy, and nothing warns you. On
+  2026-08-12, 28 of 50 secrets had accumulated that way in under a month.
+  Declare them, or adopt them in the same change —
+  `environments/multi-shared/adopted-secrets.tf` is the pattern
 - Production changes require review
