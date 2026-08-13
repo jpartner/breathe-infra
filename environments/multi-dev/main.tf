@@ -259,6 +259,10 @@ resource "google_storage_bucket" "files" {
     condition {
       age            = 2
       matches_prefix = ["uploads/"]
+      # Declared because GCS fills it in. Left undeclared, Terraform stores ""
+      # while the API returns "ANY", and the bucket reports as drifted on every
+      # plan — state="" against live="ANY", with nobody having changed anything.
+      with_state = "ANY"
     }
     action {
       type = "Delete"
@@ -283,6 +287,7 @@ resource "google_storage_bucket" "files" {
     condition {
       age            = 90
       matches_prefix = ["quarantine/"]
+      with_state     = "ANY"
     }
     action {
       type = "Delete"
