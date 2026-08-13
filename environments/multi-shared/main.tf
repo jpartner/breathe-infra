@@ -1294,6 +1294,10 @@ module "platform_lb" {
       cloud_run_service = google_cloud_run_v2_service.unifeed_ingest.name
       region            = var.region
     }
+    pa-migration = {
+      cloud_run_service = google_cloud_run_v2_service.pa_migration.name
+      region            = var.region
+    }
   }
 
   host_rules = {
@@ -1309,11 +1313,15 @@ module "platform_lb" {
       hosts   = ["ingest.unifeed.io"]
       backend = "unifeed-ingest"
     }
+    pa-migration = {
+      hosts   = ["pa-migration.unifeed.io"]
+      backend = "pa-migration"
+    }
   }
 
   default_backend = "unifeed-zitadel"
 
-  domains = [var.unifeed_zitadel_domain, "hub.dev.unifeed.io", "ingest.unifeed.io"]
+  domains = [var.unifeed_zitadel_domain, "hub.dev.unifeed.io", "ingest.unifeed.io", "pa-migration.unifeed.io"]
 
   depends_on = [module.unifeed_zitadel]
 }

@@ -168,3 +168,17 @@ variable "slack_build_channel" {
   type        = string
   default     = "C0BPQ4R7HC6"
 }
+
+# PA legacy lookup — the live Breathe system it reads from. Not per-environment:
+# there is one legacy database and one service in front of it.
+variable "breathe_live_project_id" {
+  description = "Legacy Breathe project holding the live Cloud SQL instance"
+  type        = string
+  default     = "breathe-dev"
+}
+
+variable "breathe_sql_connection_name" {
+  description = "Cloud SQL connection name for the live Breathe Postgres"
+  type        = string
+  default     = "breathe-dev:europe-west2:breathe-branding"
+}
