@@ -272,11 +272,27 @@ resource "google_secret_manager_secret" "postmark_api_key" {
 # =============================================================================
 
 resource "google_artifact_registry_repository" "images" {
-  for_each = toset(["pa-migration", "unifeed-backend", "unifeed-storefront", "unifeed-ingest", "unifeed-test"])
+  # unifeed-pdf was created out of band and adopted 2026-08-13 — it existed in
+  # Artifact Registry, was referenced by a running Cloud Run service, and was in
+  # no Terraform state, so nothing here would have recreated it.
+  #
+  # Descriptions are declared because adopting unifeed-pdf would otherwise have
+  # silently dropped the one it already had. They show in the console, which is
+  # where someone looks when wondering what a repository is for.
+  for_each = {
+    "pa-migration"       = "PA legacy migration service"
+    "unifeed-backend"    = "Unifeed API and catalogue services"
+    "unifeed-storefront" = "Customer-facing storefronts (all tenants)"
+    "unifeed-ingest"     = "Supplier feed ingest tool"
+    "unifeed-test"       = "E2E test runner and deploy hub"
+    "unifeed-pdf"        = "Unifeed PDF service"
+    "unifeed-render"     = "Artwork rasteriser for thumbnails"
+  }
 
   project       = var.project_id
   location      = var.region
-  repository_id = each.value
+  repository_id = each.key
+  description   = each.value
   format        = "DOCKER"
 
   cleanup_policies {
@@ -1316,3 +1332,10 @@ resource "google_kms_crypto_key" "tenant_secrets" {
 # Cloudflare DNS — breathebranding.co.uk
 # =============================================================================
 
+
+# One-time adoption of the Artifact Registry repository that was created by
+# hand. Remove once applied, as with the secret imports.
+import {
+  to = google_artifact_registry_repository.images["unifeed-pdf"]
+  id = "projects/breathe-shared/locations/europe-west2/repositories/unifeed-pdf"
+}

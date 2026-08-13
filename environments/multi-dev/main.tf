@@ -231,6 +231,40 @@ resource "google_storage_bucket" "files" {
   location                    = var.region
   uniform_bucket_level_access = true
 
+  # Abandoned customer uploads are hard-deleted. The staged upload endpoint is
+  # public and unauthenticated, so without this anything uploaded and never
+  # accepted accumulates forever, and it is exactly the content nobody is
+  # watching. The app sweeps at 24h; this is the backstop for when it does not.
+  #
+  # Two things about the prefix, both load-bearing:
+  #
+  #   It must LEAD. GCS lifecycle offers only matches_prefix / matches_suffix,
+  #   with no mid-path wildcard, so a layout of {tenant}/uploads/ could only be
+  #   matched by enumerating every tenant — and a tenant added without its rule
+  #   would silently accumulate public uploads. Leading, one rule covers every
+  #   tenant including ones that do not exist yet.
+  #
+  #   It must not be an environment name. `staging/` was the original proposal
+  #   and would have produced unifeed-staging-files/staging/... — a console rule
+  #   reading "delete staging after 48h" invites someone to remove it out of
+  #   caution, or to generalise it to the environment.
+  #
+  # Anchored at uploads/, this cannot match {tenant}/artwork/ or
+  # {tenant}/thumbnails/ under any circumstances — the safety property holds
+  # structurally rather than by rule ordering.
+  #
+  # age is in whole days and GCS evaluates lifecycle asynchronously, so "48h" is
+  # really 48–72h. Fine for a backstop; do not rely on it for a tighter bound.
+  lifecycle_rule {
+    condition {
+      age            = 2
+      matches_prefix = ["uploads/"]
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
   labels = {
     environment = var.environment
     managed_by  = "terraform"
