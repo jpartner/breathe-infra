@@ -306,6 +306,30 @@ resource "google_storage_bucket_iam_member" "backend_files" {
   member = "serviceAccount:${google_service_account.backend.email}"
 }
 
+# Read-only access to Breathe's uploaded artwork bucket, so the artwork library
+# can import a legacy blob into a tenant's own files.
+#
+# Read this before changing it: `breathe-dev` is Breathe PRODUCTION, despite the
+# name. `breathe-dev-env` is the Unifeed dev project. This binding therefore
+# gives a dev service read access to live customer artwork, which is deliberate
+# — the artwork worth importing is the real artwork and there is no dev copy —
+# but it is a decision, not a detail.
+#
+# Scoped to the one bucket rather than the project. sa-backend has no business
+# reading anything else in there, and a bucket-scoped binding states exactly what
+# it is for. objectViewer, not objectAdmin: the import copies bytes out and
+# writes them into unifeed-{env}-files under the tenant prefix, so nothing in
+# Breathe's project is ever modified.
+#
+# Follows the precedent of pa_migration_breathe_sql in multi-shared, which takes
+# read-only Cloud SQL on the same project. The README's "never modify
+# breathe-dev" still holds for everything else.
+resource "google_storage_bucket_iam_member" "backend_breathe_legacy_artwork" {
+  bucket = "breathe_uploaded_artwork"
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # Writes the external.call metrics that the dependency alert policies in
 # monitoring.tf read. Without this the Stackdriver registry fails its writes and
 # the alerts go silent — which is why monitoring.tf also alerts on the metrics
