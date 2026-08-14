@@ -239,3 +239,26 @@ resource "google_monitoring_alert_policy" "metrics_pipeline_silent" {
     auto_close = "86400s"
   }
 }
+
+variable "metrics_export_enabled" {
+  description = <<-EOT
+    Whether the backend pushes metrics to Cloud Monitoring.
+
+    False since 2026-08-14: enabling it crashed the JVM at startup in a native
+    gRPC/tcnative frame, taking every new revision down. Kept as a variable
+    rather than a hardcoded false so that re-enabling it after the transport is
+    fixed is a one-line change and an obvious thing to review, rather than an
+    edit buried in a container block.
+
+    Back on since 2026-08-14 after the cause was fixed: the crash was the Alpine
+    base image loading a glibc-only netty tcnative, not the registry itself. The
+    backend entrypoint now forces JDK SSL, verified by reproducing the segfault
+    in that exact image and confirming the flag prevents it.
+
+    Still worth knowing what this being true does and does not prove. It proves
+    the registry initialises. Whether Cloud Monitoring is actually receiving data
+    is answered by the descriptors existing, not by this flag.
+  EOT
+  type        = bool
+  default     = true
+}

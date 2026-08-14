@@ -449,6 +449,17 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
       template[0].containers[0].image,
       template[0].labels,
       labels,
+      # The deploy hub owns traffic. It pins 100% to the revision that last
+      # passed the gate, and this resource declares no traffic block — so
+      # without this, every apply silently reasserts the provider default of
+      # latestRevision = true and promotes whatever revision is newest, gate or
+      # no gate.
+      #
+      # Not hypothetical: an apply on 2026-08-14 meant only to change an
+      # environment variable moved dev onto an unvalidated candidate, because an
+      # absent block means Terraform asserts its own default rather than leaving
+      # the field alone.
+      traffic,
     ]
   }
 
@@ -523,9 +534,24 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
       # UNIFEED_ENV becomes a label on every metric, so the alert policies in
       # monitoring.tf can be scoped to this environment rather than firing on
       # whatever another environment is doing.
+      # Off since 2026-08-14. Turning it on crashed the JVM during startup:
+      # initialising the Stackdriver registry builds a gRPC client, whose
+      # tcnative JNI_OnLoad segfaults in this container (revisions 00223-00225,
+      # signal 6 roughly ten seconds in, after the web context had come up).
+      #
+      # Not a version conflict introduced by the metrics dependency —
+      # grpc-netty-shaded resolves to 1.67.1 with and without it. The registry
+      # appears to be simply the first thing in this application to load that
+      # native library at all.
+      #
+      # Flipping this to false is the mitigation, not the fix: it stops the
+      # registry initialising so the crashing path never runs, at the cost of
+      # exporting no metrics. The alert policies in monitoring.tf and
+      # monitoring-business.tf are inert until it goes back to true, so do not
+      # read their absence of incidents as good news.
       env {
         name  = "METRICS_EXPORT_ENABLED"
-        value = "true"
+        value = var.metrics_export_enabled ? "true" : "false"
       }
       env {
         name  = "UNIFEED_ENV"
@@ -834,13 +860,33 @@ resource "google_cloud_run_v2_job" "unifeed_catalogue_sync" {
       }
 
       containers {
-        image   = "${var.region}-docker.pkg.dev/${var.shared_project_id}/unifeed-backend/unifeed-backend:latest"
-        command = ["java", "-jar", "app.jar", "--spring.profiles.active=job"]
+        image = "${var.region}-docker.pkg.dev/${var.shared_project_id}/unifeed-backend/unifeed-backend:latest"
+        # MaxRAMPercentage is explicit because the default is 25%, which on a
+        # container this size leaves most of the memory unusable as heap — see
+        # the resources block below.
+        command = ["java", "-XX:MaxRAMPercentage=75", "-jar", "app.jar", "--spring.profiles.active=job"]
 
         resources {
           limits = {
-            cpu    = "2"
-            memory = "2Gi"
+            cpu = "2"
+            # 4Gi, up from the 2Gi this ran at until 2026-08-14, when the sync
+            # died with OutOfMemoryError before finishing its first supplier.
+            #
+            # The container size was never really the problem. Nothing sets a
+            # heap flag, so the JVM takes its default MaxRAMPercentage of 25% —
+            # which at 2Gi is a 512 MB heap. PfModule reads five feeds into
+            # memory as Java Strings before parsing, and the product feed alone
+            # is 189 MB held two bytes per character (the OOM was inside
+            # StringUTF16.newBytesFor). It was never going to fit.
+            #
+            # So the command below sets MaxRAMPercentage explicitly: 75% of 4Gi
+            # is a 3 GB heap against a measured peak of ~1.6 GB for the whole
+            # container, which is roughly double the headroom in half the
+            # memory an unflagged 8Gi container needed.
+            #
+            # The real fix is streaming the feed rather than materialising it as
+            # one String, after which this can come down again.
+            memory = "4Gi"
           }
         }
 
