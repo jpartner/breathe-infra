@@ -306,6 +306,16 @@ resource "google_storage_bucket_iam_member" "backend_files" {
   member = "serviceAccount:${google_service_account.backend.email}"
 }
 
+# Writes the external.call metrics that the dependency alert policies in
+# monitoring.tf read. Without this the Stackdriver registry fails its writes and
+# the alerts go silent — which is why monitoring.tf also alerts on the metrics
+# themselves disappearing.
+resource "google_project_iam_member" "backend_metric_writer" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # Backend SA needs to sign URLs for file downloads
 resource "google_project_iam_member" "backend_token_creator" {
   project = var.project_id
@@ -506,6 +516,24 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
       env {
         name  = "ZITADEL_ISSUER"
         value = var.unifeed_zitadel_issuer
+      }
+
+      # Metrics export. Off by default in the application so local runs and
+      # tests never authenticate against Cloud Monitoring; switched on here.
+      # UNIFEED_ENV becomes a label on every metric, so the alert policies in
+      # monitoring.tf can be scoped to this environment rather than firing on
+      # whatever another environment is doing.
+      env {
+        name  = "METRICS_EXPORT_ENABLED"
+        value = "true"
+      }
+      env {
+        name  = "UNIFEED_ENV"
+        value = var.environment
+      }
+      env {
+        name  = "UNIFEED_REGION"
+        value = var.region
       }
 
       # Staff management (plans/staff-management.md): the backend manages
