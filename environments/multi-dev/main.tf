@@ -797,6 +797,32 @@ resource "google_cloud_run_v2_service" "unifeed_backend" {
         }
       }
 
+      # Where Cloud Tasks delivers its /internal callbacks — scan and thumbnail
+      # workers, the email retry queue, the staged-upload sweep.
+      #
+      # Unset until 2026-08-14, so the backend fell back to application.yml's
+      # development default of http://localhost:8080. Cloud Tasks will not
+      # deliver to localhost and rejects the task at CREATION with 400 Bad
+      # Request, which reads as a malformed queue path or a missing IAM grant
+      # rather than an undeliverable target. Every scan enqueue failed, so
+      # uploaded files stayed PENDING and undownloadable, and the scan specs
+      # skipped rather than failed — a green suite that had never run the path.
+      #
+      # The public domain rather than google_cloud_run_v2_service.unifeed_backend.uri:
+      # that is a self-reference inside this resource and Terraform refuses the
+      # cycle. The domain is what the rest of this file already uses to address
+      # the backend, and the OIDC audience does not constrain the choice —
+      # allUsers holds run.invoker here so Cloud Run never checks it, and the
+      # app permits /internal itself.
+      #
+      # Appended rather than inserted: env is an ordered list to Terraform, so
+      # inserting mid-list renames every block after it and rewrites
+      # WORKER_API_KEY's secret_key_ref as a plain value.
+      env {
+        name  = "INTERNAL_BASE_URL"
+        value = "https://api.dev.unifeed.io"
+      }
+
       startup_probe {
         http_get {
           path = "/health"
