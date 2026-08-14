@@ -1902,6 +1902,23 @@ resource "google_service_account_iam_member" "scheduler_act_as_backend" {
   member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
 }
 
+# Same grant, for the backend acting as itself. Creating a Cloud Task that
+# carries an OIDC token requires iam.serviceAccounts.actAs on the account named
+# in that token, and the backend names itself — so sa-backend needs to be a
+# serviceAccountUser of sa-backend. Self-referential and reads oddly, but it is
+# the standard requirement for Cloud Run → Cloud Tasks → Cloud Run with OIDC.
+#
+# Note this is NOT covered by the project-level roles/iam.serviceAccountTokenCreator
+# the backend already holds. That role carries getAccessToken, getOpenIdToken,
+# signBlob and signJwt — it does not carry actAs, which lives in
+# roles/iam.serviceAccountUser. The two are easy to conflate and the failure is
+# an opaque "Forbidden" from createTask either way.
+resource "google_service_account_iam_member" "backend_act_as_self" {
+  service_account_id = google_service_account.backend.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # Deletes staged customer uploads that were never promoted to real artwork.
 # This is what actually bounds the uploads/ prefix to the 24h the application
 # advertises; the 48h GCS lifecycle rule on unifeed-dev-files is the backstop for
