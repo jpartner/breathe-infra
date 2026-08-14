@@ -15,7 +15,7 @@
 # know that orders should not be zero for a day.
 #
 # Metrics come from io.unifeed.core.telemetry.BusinessEvent:
-#   custom.googleapis.com/business.event.total  CUMULATIVE  {event, outcome, tenant}
+#   custom.googleapis.com/business/event/total  CUMULATIVE  {event, outcome, tenant}
 
 variable "business_absence_window" {
   description = <<-EOT
@@ -64,7 +64,7 @@ resource "google_monitoring_alert_policy" "orders_absent" {
 
     condition_absent {
       filter = join(" AND ", [
-        "metric.type = \"custom.googleapis.com/business.event.total\"",
+        "metric.type = \"custom.googleapis.com/business/event/total\"",
         "resource.type = \"generic_task\"",
         "metric.labels.env = \"${var.environment}\"",
         "metric.labels.outcome = \"success\"",
@@ -127,7 +127,7 @@ resource "google_monitoring_alert_policy" "payment_webhooks_absent" {
 
     condition_absent {
       filter = join(" AND ", [
-        "metric.type = \"custom.googleapis.com/business.event.total\"",
+        "metric.type = \"custom.googleapis.com/business/event/total\"",
         "resource.type = \"generic_task\"",
         "metric.labels.env = \"${var.environment}\"",
         "metric.labels.event = \"payment.webhook.received\"",

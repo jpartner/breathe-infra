@@ -9,9 +9,9 @@
 #
 # The metrics are published by the backend (io.unifeed.core.telemetry.ExternalCall):
 #
-#   custom.googleapis.com/external.call.total              CUMULATIVE  volume + outcomes
-#   custom.googleapis.com/external.call.last.success.age   GAUGE       seconds since last success
-#   custom.googleapis.com/external.call                    DISTRIBUTION latency
+#   custom.googleapis.com/external/call/total              CUMULATIVE  volume + outcomes
+#   custom.googleapis.com/external/call/last/success/age   GAUGE       seconds since last success
+#   custom.googleapis.com/external/call                    DISTRIBUTION latency
 #
 # ORDERING: a Cloud Monitoring alert policy can only reference a metric
 # descriptor that already exists, and descriptors are created on first write.
@@ -81,7 +81,7 @@ resource "google_monitoring_alert_policy" "provider_stale" {
       Check, in order:
         1. Is the provider's own status page or website up at all?
         2. Are we erroring, timing out, or getting empty 200s? Break down
-           custom.googleapis.com/external.call.total by the `outcome` label.
+           custom.googleapis.com/external/call/total by the `outcome` label.
         3. If outcome is `cached`, we have not actually reached them since the
            cache warmed — the cache is masking the outage.
         4. Have our credentials expired, or has the provider changed its API?
@@ -94,7 +94,7 @@ resource "google_monitoring_alert_policy" "provider_stale" {
 
     condition_threshold {
       filter = join(" AND ", [
-        "metric.type = \"custom.googleapis.com/external.call.last.success.age\"",
+        "metric.type = \"custom.googleapis.com/external/call/last/success/age\"",
         "resource.type = \"generic_task\"",
         "metric.labels.env = \"${var.environment}\"",
       ])
@@ -136,7 +136,7 @@ resource "google_monitoring_alert_policy" "provider_failing" {
   documentation {
     content   = <<-EOT
       Calls to an external provider are failing (outcome error, timeout, or
-      empty). Break down custom.googleapis.com/external.call.total by `provider`
+      empty). Break down custom.googleapis.com/external/call/total by `provider`
       and `outcome` to see which and how.
 
       `empty` means the call succeeded at the transport level and returned
@@ -151,7 +151,7 @@ resource "google_monitoring_alert_policy" "provider_failing" {
 
     condition_threshold {
       filter = join(" AND ", [
-        "metric.type = \"custom.googleapis.com/external.call.total\"",
+        "metric.type = \"custom.googleapis.com/external/call/total\"",
         "resource.type = \"generic_task\"",
         "metric.labels.env = \"${var.environment}\"",
         "metric.labels.outcome = one_of(\"error\", \"timeout\", \"empty\", \"server_error\")",
@@ -216,7 +216,7 @@ resource "google_monitoring_alert_policy" "metrics_pipeline_silent" {
 
     condition_absent {
       filter = join(" AND ", [
-        "metric.type = \"custom.googleapis.com/external.call.total\"",
+        "metric.type = \"custom.googleapis.com/external/call/total\"",
         "resource.type = \"generic_task\"",
         "metric.labels.env = \"${var.environment}\"",
       ])
