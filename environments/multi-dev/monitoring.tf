@@ -36,20 +36,23 @@ variable "metrics_silent_window" {
     How long external.call metrics may be absent before we are told the alerting
     itself has gone dark.
 
-    An hour was the obvious value and it was wrong here. This backend runs with
-    minScale = 0, so when nobody browses the storefront no instance exists, no
-    call leaves the process, and no metric is written — a quiet night on dev is
-    indistinguishable from a broken metrics pipeline, and a one-hour window turns
-    that into a nightly false alarm. An alert that cries wolf every night is
-    worse than no alert, because it trains the reader to delete it unread.
+    Watches process/uptime rather than external.call, which is the correction
+    that matters. The two answer different questions: "no outbound calls
+    happened" is normal on dev overnight, while "no instance has reported
+    anything" never is. Alerting on the first produced a nightly false alarm and
+    would have trained everyone to delete the mail unread.
 
-    Six hours is long enough to sit out an idle evening and short enough that a
-    genuinely broken pipeline is caught the same working day. Production, with
-    steady traffic or a warm instance, wants this back down near an hour — the
-    premise "the backend is always running" is true there and false here.
+    Two hours is derived rather than picked. staged_upload_sweep runs hourly and
+    wakes an instance, and a live instance publishes process/uptime every step —
+    so under normal operation there is never a two-hour gap, whether or not
+    anybody browsed the storefront. If this fires, either no instance has run in
+    two hours or export is broken, and both are worth knowing.
+
+    Tighten it if the hourly sweep ever stops being the floor; it is the only
+    thing making this window meaningful.
   EOT
   type        = string
-  default     = "21600s"
+  default     = "7200s"
 }
 
 variable "provider_stale_threshold_seconds" {
@@ -218,8 +221,9 @@ resource "google_monitoring_alert_policy" "metrics_pipeline_silent" {
 
   documentation {
     content   = <<-EOT
-      unifeed-backend has published no external.call metrics for
-      $${var.metrics_silent_window}.
+      unifeed-backend has published no metrics at all for
+      $${var.metrics_silent_window} — not a quiet period, an absence of any
+      instance reporting.
 
       Check first whether the serving revision even has metrics enabled. A
       rollback pins traffic to the revision that was serving when a transaction
@@ -241,11 +245,15 @@ resource "google_monitoring_alert_policy" "metrics_pipeline_silent" {
   }
 
   conditions {
-    display_name = "No external call metrics for an hour"
+    display_name = "No instance has reported metrics"
 
     condition_absent {
       filter = join(" AND ", [
-        "metric.type = \"custom.googleapis.com/external/call/total\"",
+        # process/uptime, not external.call: any live instance publishes this
+        # every step regardless of whether it called anyone. external.call going
+        # quiet means nobody browsed; this going quiet means nothing is running
+        # or nothing is exporting.
+        "metric.type = \"custom.googleapis.com/process/uptime\"",
         "resource.type = \"generic_task\"",
         "metric.labels.env = \"${var.environment}\"",
       ])
@@ -253,9 +261,12 @@ resource "google_monitoring_alert_policy" "metrics_pipeline_silent" {
       duration = var.metrics_silent_window
 
       aggregations {
-        alignment_period     = "300s"
-        per_series_aligner   = "ALIGN_DELTA"
-        cross_series_reducer = "REDUCE_SUM"
+        alignment_period = "300s"
+        # ALIGN_MEAN, not ALIGN_DELTA. process/uptime is a GAUGE, and Cloud
+        # Monitoring rejects a delta aligner on a gauge outright — the previous
+        # value was carried over from when this watched a cumulative counter.
+        per_series_aligner   = "ALIGN_MEAN"
+        cross_series_reducer = "REDUCE_MEAN"
       }
 
       trigger { count = 1 }
