@@ -31,6 +31,27 @@ variable "alert_email" {
   default     = "dev@breathebranding.co.uk"
 }
 
+variable "metrics_silent_window" {
+  description = <<-EOT
+    How long external.call metrics may be absent before we are told the alerting
+    itself has gone dark.
+
+    An hour was the obvious value and it was wrong here. This backend runs with
+    minScale = 0, so when nobody browses the storefront no instance exists, no
+    call leaves the process, and no metric is written — a quiet night on dev is
+    indistinguishable from a broken metrics pipeline, and a one-hour window turns
+    that into a nightly false alarm. An alert that cries wolf every night is
+    worse than no alert, because it trains the reader to delete it unread.
+
+    Six hours is long enough to sit out an idle evening and short enough that a
+    genuinely broken pipeline is caught the same working day. Production, with
+    steady traffic or a warm instance, wants this back down near an hour — the
+    premise "the backend is always running" is true there and false here.
+  EOT
+  type        = string
+  default     = "21600s"
+}
+
 variable "provider_stale_threshold_seconds" {
   description = <<-EOT
     How long a provider may go without a single successful call before we are
@@ -197,7 +218,15 @@ resource "google_monitoring_alert_policy" "metrics_pipeline_silent" {
 
   documentation {
     content   = <<-EOT
-      unifeed-backend has published no external.call metrics for an hour.
+      unifeed-backend has published no external.call metrics for
+      $${var.metrics_silent_window}.
+
+      Check first whether the serving revision even has metrics enabled. A
+      rollback pins traffic to the revision that was serving when a transaction
+      started, and a Cloud Run revision carries the environment it was created
+      with — so a rollback past the apply that enabled metrics turns them off
+      again while Terraform still reports them on. That has been the cause every
+      time so far.
 
       This does not mean a dependency is down — it means we have lost the
       ability to tell. Until it is resolved, treat the two dependency alert
@@ -221,7 +250,7 @@ resource "google_monitoring_alert_policy" "metrics_pipeline_silent" {
         "metric.labels.env = \"${var.environment}\"",
       ])
 
-      duration = "3600s"
+      duration = var.metrics_silent_window
 
       aggregations {
         alignment_period     = "300s"

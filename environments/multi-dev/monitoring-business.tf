@@ -26,9 +26,15 @@ variable "business_absence_window" {
     worse than not having it. Production wants this driven by the observed floor
     of real traffic per event, and it should be revisited once there is a week
     of data to look at rather than guessed a second time.
+
+    Capped by the API, not by choice: Cloud Monitoring rejects an absence
+    duration longer than 23h30m, so "no orders for a full day" is not directly
+    expressible and 84600s is the closest available. Worth knowing before
+    someone tries to widen this and gets a 400 from an apply that has already
+    created half the policies.
   EOT
   type        = string
-  default     = "86400s"
+  default     = "84600s"
 }
 
 # -----------------------------------------------------------------------------
