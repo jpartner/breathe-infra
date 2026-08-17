@@ -42,17 +42,26 @@ variable "metrics_silent_window" {
     anything" never is. Alerting on the first produced a nightly false alarm and
     would have trained everyone to delete the mail unread.
 
-    Two hours is derived rather than picked. staged_upload_sweep runs hourly and
-    wakes an instance, and a live instance publishes process/uptime every step —
-    so under normal operation there is never a two-hour gap, whether or not
-    anybody browsed the storefront. If this fires, either no instance has run in
-    two hours or export is broken, and both are worth knowing.
+    Eight hours is derived from what actually wakes this service, not picked for
+    feel. During the working day real traffic keeps an instance alive. Overnight
+    nothing does except staged_upload_sweep, which now runs once at 02:30 UTC and
+    splits the quiet into two stretches of roughly five and seven hours. Eight
+    hours clears the longer of those with room to spare, and still catches a dead
+    pipeline within a working morning.
 
-    Tighten it if the hourly sweep ever stops being the floor; it is the only
-    thing making this window meaningful.
+    This is the weakest alert of the set and it is worth saying so. It is bounded
+    below by the sweep and above by Cloud Monitoring, which refuses any absence
+    duration over 23h30m — so on a service that scales to zero there is no window
+    that both tolerates a genuinely idle night and reacts quickly. The fix is a
+    regular liveness signal rather than a cleverer number: an uptime check every
+    fifteen minutes would make two hours defensible, at the cost of keeping an
+    instance warm around the clock.
+
+    Move the sweep and this has to move with it. There is nothing else holding
+    the floor up.
   EOT
   type        = string
-  default     = "7200s"
+  default     = "28800s"
 }
 
 variable "provider_stale_threshold_seconds" {

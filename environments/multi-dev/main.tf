@@ -2038,9 +2038,18 @@ resource "google_cloud_scheduler_job" "staged_upload_sweep" {
   name        = "staged-upload-sweep"
   project     = var.project_id
   region      = var.region
-  description = "Hourly deletion of expired unpromoted customer uploads"
-  schedule    = "0 * * * *"
-  time_zone   = "UTC"
+  description = "Nightly deletion of expired unpromoted customer uploads"
+  # Daily, not hourly. Uploads expire at 24h, so hourly was the check cadence
+  # rather than the expiry — a daily pass collects the same objects, on average
+  # a few hours later, and the GCS lifecycle rule is the backstop behind it.
+  #
+  # 02:30 rather than 03:00 to stay clear of notification_retention_cleanup, and
+  # deliberately mid-night: it is the only thing that breaks up the overnight
+  # quiet on a service that scales to zero, which is what keeps the
+  # metrics_pipeline_silent window in monitoring.tf meaningful. Move this and
+  # that window has to move with it.
+  schedule  = "30 2 * * *"
+  time_zone = "UTC"
 
   http_target {
     uri         = "${google_cloud_run_v2_service.unifeed_backend.uri}/internal/staged-uploads/sweep"
